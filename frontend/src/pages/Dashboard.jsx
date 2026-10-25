@@ -3,7 +3,7 @@ import StatusBadge from '../components/StatusBadge';
 import RiskScoreBadge from '../components/RiskScoreBadge';
 import { mockStats, mockRecentRecords } from '../data/mockData';
 
-export default function Dashboard({ onNavigate }) {
+export default function Dashboard({ onNavigate, onSelectRecord }) {
   return (
     <div className="space-y-6">
       {/* Hero Banner / Header */}
@@ -167,8 +167,15 @@ export default function Dashboard({ onNavigate }) {
                   </td>
                   <td className="p-4 text-right">
                     <button
-                      onClick={() => onNavigate('verification')}
+                      onClick={() => {
+                        if (onSelectRecord) {
+                          onSelectRecord(record, 'verification');
+                        } else {
+                          onNavigate('verification');
+                        }
+                      }}
                       className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 hover:text-white text-slate-300 text-xs font-medium border border-slate-700 transition-colors"
+                      title="Inspect Verification Audit Report"
                     >
                       View Report
                     </button>

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import uuid
 from datetime import datetime
@@ -48,9 +49,10 @@ async def upload_document(
     # 2. Ensure Uploads Folder Exists
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-    # 3. Generate Unique Document ID and Filepath
+    # 3. Generate Unique Document ID and Filepath with path traversal protection
     doc_id = f"DOC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-    safe_filename = f"{doc_id}_{file.filename.replace(' ', '_')}"
+    clean_basename = re.sub(r"[^a-zA-Z0-9_\.-]", "_", os.path.basename(file.filename or "uploaded_doc"))
+    safe_filename = f"{doc_id}_{clean_basename}"
     saved_file_path = os.path.join(UPLOADS_DIR, safe_filename)
 
     # 4. Save File to Disk

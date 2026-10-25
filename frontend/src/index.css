@@ -46,3 +46,38 @@
 .leaflet-custom-tooltip::before {
   border-top-color: #0f172a !important;
 }
+
+/* Print & PDF Report Styles */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 12pt;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  
+  /* Ensure background colors and borders render cleanly when printing */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-card {
+    background-color: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    page-break-inside: avoid;
+  }
+}

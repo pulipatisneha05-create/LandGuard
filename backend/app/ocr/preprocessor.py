@@ -4,9 +4,16 @@ Applies computer vision filters (deskewing, contrast enhancement, denoising,
 and orientation correction) to maximize OCR extraction quality on scanned deeds.
 """
 
+from __future__ import annotations
 import math
 import logging
-import numpy as np
+from typing import Any
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from PIL import Image, ImageEnhance, ImageFilter
 
 try:
@@ -22,8 +29,10 @@ except ImportError:
 logger = logging.getLogger("landguard.ocr.preprocessor")
 
 
-def pil_to_cv2(pil_image: Image.Image) -> np.ndarray:
+def pil_to_cv2(pil_image: Image.Image) -> Any:
     """Converts a PIL Image to an OpenCV BGR/Grayscale numpy array."""
+    if np is None:
+        return None
     np_img = np.array(pil_image)
     if len(np_img.shape) == 2:
         return np_img  # already grayscale
@@ -34,8 +43,14 @@ def pil_to_cv2(pil_image: Image.Image) -> np.ndarray:
     return np_img
 
 
-def cv2_to_pil(cv2_image: np.ndarray) -> Image.Image:
+def cv2_to_pil(cv2_image: Any) -> Image.Image:
     """Converts an OpenCV image array to a PIL Image."""
+    if cv2_image is None:
+        return Image.new("RGB", (1, 1))
+    if isinstance(cv2_image, Image.Image):
+        return cv2_image
+    if np is None or not hasattr(cv2_image, "shape"):
+        return Image.new("RGB", (1, 1))
     if len(cv2_image.shape) == 2:
         return Image.fromarray(cv2_image)
     elif cv2_image.shape[2] == 3:
@@ -44,11 +59,11 @@ def cv2_to_pil(cv2_image: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2_image)
 
 
-def detect_skew_angle(cv2_gray: np.ndarray) -> float:
+def detect_skew_angle(cv2_gray: Any) -> float:
     """
     Computes skew angle (degrees) using minimum bounding box of thresholded text contours.
     """
-    if cv2 is None or cv2_gray is None:
+    if cv2 is None or np is None or cv2_gray is None:
         return 0.0
 
     try:
@@ -76,9 +91,9 @@ def detect_skew_angle(cv2_gray: np.ndarray) -> float:
         return 0.0
 
 
-def rotate_image(cv2_img: np.ndarray, angle: float) -> np.ndarray:
+def rotate_image(cv2_img: Any, angle: float) -> Any:
     """Rotates an OpenCV image by angle degrees around its center."""
-    if cv2 is None or abs(angle) < 0.5:
+    if cv2 is None or cv2_img is None or abs(angle) < 0.5:
         return cv2_img
 
     try:
@@ -129,14 +144,15 @@ def enhance_document_image(pil_image: Image.Image) -> Image.Image:
         # Check orientation
         img = check_and_fix_orientation(pil_image)
 
-        # Deskew if OpenCV is present
-        if cv2 is not None:
+        # Deskew if OpenCV and NumPy are present
+        if cv2 is not None and np is not None:
             cv_img = pil_to_cv2(img)
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
-            angle = detect_skew_angle(gray)
-            if abs(angle) >= 0.8:
-                gray = rotate_image(gray, angle)
-                img = Image.fromarray(gray)
+            if cv_img is not None:
+                gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
+                angle = detect_skew_angle(gray)
+                if abs(angle) >= 0.8:
+                    gray = rotate_image(gray, angle)
+                    img = Image.fromarray(gray)
 
         # Apply mild contrast boost and sharpening
         gray_pil = img.convert('L')

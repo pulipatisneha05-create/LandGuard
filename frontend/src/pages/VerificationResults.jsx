@@ -64,7 +64,17 @@ export default function VerificationResults({ activeDocument, verificationResult
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 no-print">
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md"
+            title="Print or Save Verification Audit as PDF"
+          >
+            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            <span>Print / PDF Report</span>
+          </button>
           <button 
             onClick={() => onNavigate('risk')}
             className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md"
@@ -191,6 +201,52 @@ export default function VerificationResults({ activeDocument, verificationResult
                   </p>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Recommended Next Steps & Protocol */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <span className="text-blue-400">📋</span>
+              <span>Recommended Revenue Actions & Verification Protocol</span>
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <span className="font-bold text-slate-200 block">1. Revenue Registry Validation</span>
+                <p className="text-slate-400">
+                  {verStatus === 'VERIFIED_MATCH'
+                    ? "Title holder and survey number align with digital registry. No manual deed cross-checking required."
+                    : isReferenceNotFound
+                    ? "Survey is unindexed in synthetic test dataset. Ingest official cadastral records to verify record history."
+                    : "Obtain certified copy of title deed from SRO to reconcile identified ownership/area conflicts."}
+                </p>
+              </div>
+              <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <span className="font-bold text-slate-200 block">2. Field Boundary Survey</span>
+                <p className="text-slate-400">
+                  {fieldMatches.land_area_match
+                    ? "Cadastral extent confirmed within tolerance boundaries. No boundary encroachment detected."
+                    : "Conduct differential GPS (DGPS) or total station field survey to verify claimed boundaries on ground."}
+                </p>
+              </div>
+              <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <span className="font-bold text-slate-200 block">3. Legal Encumbrance Audit</span>
+                <p className="text-slate-400">
+                  Verify EC Search Certificate for 30-year period across local sub-registrar office to ensure non-alienation and clear title.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Formal Audit Report Footer & Limitations Notice */}
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-blue-400 font-bold">LandGuard Audit Ref: {verData?.verification_id || `VER-${docId}`}</span>
+              <span>•</span>
+              <span>Algorithm: Deterministic Rule Matrix v2.1</span>
+            </div>
+            <div className="text-slate-500 text-center md:text-right">
+              Educational Demonstration Prototype — Uses Synthetic Data — Not an Official Government Certification.
             </div>
           </div>
         </>

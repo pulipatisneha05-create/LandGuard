@@ -69,7 +69,7 @@ export default function App() {
   const renderActivePage = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard onNavigate={(tab) => setActiveTab(tab)} />;
+        return <Dashboard onNavigate={(tab) => setActiveTab(tab)} onSelectRecord={handleSelectRecord} />;
       case 'upload':
         return <UploadDocument onUploadSuccess={handleUploadSuccess} />;
       case 'analysis':
@@ -102,14 +102,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Bar */}
-      <Navbar
-        onUploadClick={() => setActiveTab('upload')}
-        onSelectRecord={handleSelectRecord}
-        activeTab={activeTab}
-      />
+      <div className="no-print">
+        <Navbar
+          onUploadClick={() => setActiveTab('upload')}
+          onSelectRecord={handleSelectRecord}
+          activeTab={activeTab}
+        />
+      </div>
 
       {/* Persistent Synthetic / Demo Disclaimer Banner */}
-      <div className="bg-amber-950/40 border-b border-amber-800/50 px-4 py-2 text-center text-xs text-amber-300/90 flex items-center justify-center gap-2">
+      <div className="bg-amber-950/40 border-b border-amber-800/50 px-4 py-2 text-center text-xs text-amber-300/90 flex items-center justify-center gap-2 no-print">
         <span className="text-sm">⚠️</span>
         <span>
           <strong>Notice:</strong> This application operates on a <strong>synthetic demonstration dataset</strong>. Verification outcomes, risk indices, and anomaly alerts are generated for algorithmic testing and <strong>do not constitute official government verification</strong>.
@@ -119,10 +121,12 @@ export default function App() {
       {/* Main Layout Area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar Navigation */}
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+        <div className="no-print h-full">
+          <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+        </div>
 
         {/* Mobile Navigation Pills for Small Screens */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 p-2 flex items-center justify-around overflow-x-auto">
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 p-2 flex items-center justify-around overflow-x-auto no-print">
           {[
             { id: 'dashboard', label: 'Dash' },
             { id: 'upload', label: 'Upload' },

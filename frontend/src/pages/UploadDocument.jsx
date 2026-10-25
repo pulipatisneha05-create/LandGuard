@@ -9,7 +9,8 @@ export default function UploadDocument({ onUploadSuccess }) {
   const [errorMessage, setErrorMessage] = useState(null);
 
   const sampleDeeds = [
-    { name: "LandGuard_Synthetic_Test_Land_Record.pdf", size: "28 KB", type: "Sale Deed", status: "Synthetic Test PDF (Arun Kumar - 240 Sq Yds)" },
+    { name: "LandGuard_Synthetic_Test_Land_Record.pdf", size: "28 KB", type: "Sale Deed", status: "Synthetic Test PDF (Arun Kumar - 240 Sq Yds)", staticFile: "LandGuard_Synthetic_Test_Land_Record.pdf" },
+    { name: "sample_deed.png", size: "28 KB", type: "Sale Deed (Image)", status: "Synthetic Scanned Deed Image (Rajesh Kumar - Survey 402/B)", staticFile: "sample_deed.png" },
     { name: "7_12_Extract_Survey_118.pdf", size: "1.8 MB", type: "Patta Passbook", status: "Synthetic RoR (Venkat Swamy - 20 Guntas)" },
     { name: "Encumbrance_Certificate_304C.pdf", size: "1.2 MB", type: "Encumbrance Certificate", status: "Synthetic EC (Anuradha Rao - 3.5 Acres)" }
   ];
@@ -30,8 +31,26 @@ export default function UploadDocument({ onUploadSuccess }) {
     }
   };
 
-  const handleSelectSample = (sample) => {
+  const handleSelectSample = async (sample) => {
     setErrorMessage(null);
+
+    // Try fetching the actual static sample file if available in public/samples
+    if (sample.staticFile) {
+      try {
+        const resp = await fetch(`/samples/${sample.staticFile}`);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const mimeType = sample.staticFile.endsWith('.png') ? 'image/png' : 'application/pdf';
+          const file = new File([blob], sample.name, { type: mimeType });
+          setSelectedFile(file);
+          setDocumentType(sample.type);
+          return;
+        }
+      } catch (err) {
+        console.info("Static sample fetch notice, falling back to embedded generator:", err);
+      }
+    }
+
     let textContent = "";
     if (sample.name.includes("LandGuard_Synthetic_Test")) {
       textContent = "SYNTHETIC SAMPLE — LAND RECORD TEST DOCUMENT\nRecord ID: LG-TEST-0001\nOwner name: Arun Kumar\nSurvey number: SY-TEST-104/2\nLand area: 240 square yards\nVillage / locality: Green Valley\nDistrict: Demo District\nDocument number: DOC-TEST-2026-001\nDocument date: 15 September 2026\nBoundary - North: Demo Plot SY-TEST-103\nBoundary - South: Demo Road\nBoundary - East: Demo Plot SY-TEST-105\nBoundary - West: Demo Drain";
@@ -40,8 +59,8 @@ export default function UploadDocument({ onUploadSuccess }) {
     } else {
       textContent = "GOVERNMENT OF TELANGANA - REGISTRATION AND STAMPS DEPARTMENT\nSTATEMENT OF ENCUMBRANCE ON PROPERTY (FORM NO. 32)\nCertificate No: EC-2026-8812\nApplication Number: APP-7712\nSearch Period: 01-Jan-2010 to 15-Oct-2026\nOwner / Title Holder: Smt. Anuradha Rao\nSurvey Number: 304/C\nExtent: 3.50 Acres\nVillage: Kondapur, Mandal: Serilingampally, District: Ranga Reddy\nEncumbrance Status: NIL ENCUMBRANCE (Nil certificate issued)";
     }
-    const sampleBlob = new Blob([textContent], { type: "application/pdf" });
-    const file = new File([sampleBlob], sample.name, { type: "application/pdf" });
+    const sampleBlob = new Blob([textContent], { type: "text/plain" });
+    const file = new File([sampleBlob], sample.name, { type: "text/plain" });
     setSelectedFile(file);
     setDocumentType(sample.type);
   };

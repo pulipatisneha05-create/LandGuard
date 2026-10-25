@@ -30,11 +30,12 @@ def init_db_tables():
     except Exception as e:
         logger.warning(f"Notice: Database metadata create_all warning: {e}")
 
-# Enable CORS for local frontend development
+# Enable CORS for local and cloud frontend deployments
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=r"^https?://.*",
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

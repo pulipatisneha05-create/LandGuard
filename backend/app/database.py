@@ -1,6 +1,9 @@
+import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import settings
+
+logger = logging.getLogger("landguard.database")
 
 # Create SQLAlchemy Database Engine
 engine = create_engine(
@@ -29,7 +32,8 @@ def get_db():
 
 def check_db_connection() -> dict:
     """
-    Helper function to verify database connectivity for health checks.
+    Helper function to verify database connectivity for health checks
+    without exposing credentials, connection strings, or stack traces.
     """
     try:
         with engine.connect() as connection:
@@ -42,6 +46,15 @@ def check_db_connection() -> dict:
                 tables = [r[0] for r in res.fetchall()]
             except Exception:
                 tables = []
-        return {"status": "connected", "database": settings.POSTGRES_DB, "tables": tables}
+        return {
+            "status": "connected",
+            "database": settings.POSTGRES_DB,
+            "tables_count": len(tables),
+            "tables": tables
+        }
     except Exception as e:
-        return {"status": "disconnected", "error": str(e)}
+        logger.warning(f"Database connection check notice (credentials concealed): {type(e).__name__}")
+        return {
+            "status": "disconnected",
+            "message": "Database service is temporarily unreachable. Operating in resilient fallback mode."
+        }
