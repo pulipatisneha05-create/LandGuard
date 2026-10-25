@@ -146,19 +146,19 @@ export default function DocumentAnalysis({ activeDocument, onProceedToResults })
               <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 flex justify-between items-center">
                 <div>
                   <span className="text-[11px] font-semibold text-slate-500 uppercase block">Claimed Land Extent</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 mt-0.5">
                     <span className="text-sm font-bold text-white">
-                      {fields.land_area_raw || (fields.land_area_acres ? `${fields.land_area_acres} Acres` : "Not detected in document")}
+                      {fields.land_area_raw || (fields.land_area_normalized_acres != null ? `${fields.land_area_normalized_acres} Acres` : (fields.land_area_acres ? `${fields.land_area_acres} Acres` : "Not detected in document"))}
                     </span>
-                    {fields.land_area_raw && fields.land_area_normalized_acres && !fields.land_area_raw.toLowerCase().includes("acre") && (
-                      <span className="text-xs font-mono text-blue-400 bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-900/50">
-                        {fields.land_area_normalized_acres} Acres normalized
+                    {fields.land_area_raw && fields.land_area_normalized_acres != null && !fields.land_area_raw.toLowerCase().includes("acre") && (
+                      <span className="text-xs font-mono text-blue-300 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800/80" title="Normalized mathematically for cadastral cross-comparison">
+                        ≈ {Number(fields.land_area_normalized_acres).toFixed(4)} Acres (Normalized)
                       </span>
                     )}
                   </div>
                 </div>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                  fields.land_area_raw || fields.land_area_acres 
+                  fields.land_area_raw || fields.land_area_normalized_acres || fields.land_area_acres 
                     ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' 
                     : 'bg-slate-800 text-slate-400 border border-slate-700'
                 }`}>

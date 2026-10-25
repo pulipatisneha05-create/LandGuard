@@ -96,7 +96,10 @@ async def upload_document(
         extracted_text=ocr_text,
         extracted_owner_name=fields.get("owner_name"),
         extracted_survey_number=fields.get("survey_number"),
-        extracted_land_area=fields.get("land_area_acres"),
+        extracted_land_area=fields.get("land_area_normalized_acres") if fields.get("land_area_normalized_acres") is not None else fields.get("land_area_acres"),
+        extracted_land_area_raw=fields.get("land_area_raw"),
+        extracted_land_area_unit=fields.get("land_area_unit"),
+        extracted_land_area_normalized_acres=fields.get("land_area_normalized_acres"),
         extracted_location=nlp_result.get("location_summary"),
         ocr_confidence_score=ocr_result.get("confidence", 0.0)
     )
@@ -247,7 +250,10 @@ def get_document_details(document_id: str, db: Session = Depends(get_db)):
                 "ocr_confidence_score": float(ocr_res.get("confidence", 0.0)),
                 "extracted_owner_name": fields.get("owner_name"),
                 "extracted_survey_number": fields.get("survey_number"),
-                "extracted_land_area": fields.get("land_area_acres"),
+                "extracted_land_area": float(fields.get("land_area_normalized_acres") if fields.get("land_area_normalized_acres") is not None else (fields.get("land_area_acres") or 0.0)),
+                "extracted_land_area_raw": fields.get("land_area_raw"),
+                "extracted_land_area_unit": fields.get("land_area_unit"),
+                "extracted_land_area_normalized_acres": float(fields.get("land_area_normalized_acres")) if fields.get("land_area_normalized_acres") is not None else None,
                 "extracted_location": nlp_res.get("location_summary"),
                 "extracted_text": ocr_text
             }
@@ -265,6 +271,9 @@ def get_document_details(document_id: str, db: Session = Depends(get_db)):
         "extracted_owner_name": record.extracted_owner_name,
         "extracted_survey_number": record.extracted_survey_number,
         "extracted_land_area": float(record.extracted_land_area) if record.extracted_land_area else 0.0,
+        "extracted_land_area_raw": getattr(record, "extracted_land_area_raw", None),
+        "extracted_land_area_unit": getattr(record, "extracted_land_area_unit", None),
+        "extracted_land_area_normalized_acres": float(record.extracted_land_area_normalized_acres) if getattr(record, "extracted_land_area_normalized_acres", None) is not None else (float(record.extracted_land_area) if record.extracted_land_area else 0.0),
         "extracted_location": record.extracted_location,
         "extracted_text": record.extracted_text
     }
@@ -314,7 +323,13 @@ def extract_document_nlp(document_id: str, db: Session = Depends(get_db)):
     if record:
         record.extracted_owner_name = fields.get("owner_name")
         record.extracted_survey_number = fields.get("survey_number")
-        record.extracted_land_area = fields.get("land_area_acres")
+        record.extracted_land_area = fields.get("land_area_normalized_acres") if fields.get("land_area_normalized_acres") is not None else fields.get("land_area_acres")
+        if hasattr(record, "extracted_land_area_raw"):
+            record.extracted_land_area_raw = fields.get("land_area_raw")
+        if hasattr(record, "extracted_land_area_unit"):
+            record.extracted_land_area_unit = fields.get("land_area_unit")
+        if hasattr(record, "extracted_land_area_normalized_acres"):
+            record.extracted_land_area_normalized_acres = fields.get("land_area_normalized_acres")
         record.extracted_location = nlp_result.get("location_summary")
         try:
             db.commit()

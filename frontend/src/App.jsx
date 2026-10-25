@@ -41,7 +41,10 @@ export default function App() {
       extracted_nlp_fields: {
         owner_name: owner,
         survey_number: surveyNo,
-        land_area_acres: area,
+        land_area_raw: record.extracted_land_area_raw || record.land_area_raw || (record.area ? `${record.area}` : `${area} Acres`),
+        land_area_unit: record.extracted_land_area_unit || record.land_area_unit || "Acres",
+        land_area_normalized_acres: record.extracted_land_area_normalized_acres != null ? record.extracted_land_area_normalized_acres : area,
+        land_area_acres: record.extracted_land_area_normalized_acres != null ? record.extracted_land_area_normalized_acres : area,
         village: village,
         mandal: mandal,
         district: district,
@@ -53,7 +56,10 @@ export default function App() {
       extracted_fields: {
         owner_name: owner,
         survey_number: surveyNo,
-        land_area_acres: area,
+        land_area_raw: record.extracted_land_area_raw || record.land_area_raw || (record.area ? `${record.area}` : `${area} Acres`),
+        land_area_unit: record.extracted_land_area_unit || record.land_area_unit || "Acres",
+        land_area_normalized_acres: record.extracted_land_area_normalized_acres != null ? record.extracted_land_area_normalized_acres : area,
+        land_area_acres: record.extracted_land_area_normalized_acres != null ? record.extracted_land_area_normalized_acres : area,
         village: village,
         mandal: mandal,
         district: district,

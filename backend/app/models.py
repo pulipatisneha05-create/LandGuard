@@ -44,7 +44,10 @@ class DocumentRecord(Base):
     extracted_text = Column(Text)
     extracted_owner_name = Column(String(150))
     extracted_survey_number = Column(String(50))
-    extracted_land_area = Column(Numeric(10, 2))
+    extracted_land_area = Column(Numeric(12, 4))
+    extracted_land_area_raw = Column(String(100))
+    extracted_land_area_unit = Column(String(50))
+    extracted_land_area_normalized_acres = Column(Numeric(12, 4))
     extracted_location = Column(String(255))
     ocr_confidence_score = Column(Numeric(5, 2))
 

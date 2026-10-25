@@ -80,3 +80,56 @@ def test_compare_areas_cross_units():
     res2 = compare_areas(240, "square yards", 2.45, "Acres", tolerance_pct=5.0)
     assert res2["match"] is False
     assert res2["discrepancy_pct"] > 90.0
+
+
+def test_round_trip_and_tolerance_checks():
+    """
+    Round-trip and tolerance tests across Indian & standard land measurement units:
+    Square Yards, Square Feet, Acres, and Hectares.
+    """
+    # 1. Square Yards Round-Trip
+    initial_sqyd = 240.0
+    acres_from_sqyd = convert_to_acres(initial_sqyd, "square yards")
+    # 1 acre = 4840 sq yards
+    sqyd_recovered = acres_from_sqyd * 4840.0
+    assert abs(sqyd_recovered - initial_sqyd) < 1e-4
+    assert abs(acres_from_sqyd - 0.0495867) < 1e-5
+
+    # Tolerance check: 240 sq yards compared to 0.0496 acres is within 0.1% tolerance
+    res_sqyd = compare_areas(initial_sqyd, "square yards", 0.04959, "acres", tolerance_pct=1.0)
+    assert res_sqyd["match"] is True
+
+    # 2. Square Feet Round-Trip
+    initial_sqft = 21780.0  # Exactly 0.5 Acre
+    acres_from_sqft = convert_to_acres(initial_sqft, "square feet")
+    sqft_recovered = acres_from_sqft * 43560.0
+    assert abs(sqft_recovered - initial_sqft) < 1e-4
+    assert abs(acres_from_sqft - 0.50) < 1e-6
+
+    res_sqft = compare_areas(initial_sqft, "sq ft", 0.50, "acres", tolerance_pct=0.5)
+    assert res_sqft["match"] is True
+
+    # 3. Acres Identity & Round-Trip
+    initial_acres = 3.50
+    acres_converted = convert_to_acres(initial_acres, "acres")
+    assert abs(acres_converted - initial_acres) < 1e-9
+    res_acres = compare_areas(initial_acres, "acres", 3.50, "acres", tolerance_pct=0.1)
+    assert res_acres["match"] is True
+
+    # 4. Hectares Round-Trip
+    initial_hectares = 2.0
+    acres_from_ha = convert_to_acres(initial_hectares, "hectares")
+    ha_recovered = acres_from_ha / 2.47105381
+    assert abs(ha_recovered - initial_hectares) < 1e-4
+    assert abs(acres_from_ha - 4.9421) < 1e-3
+
+    res_ha = compare_areas(initial_hectares, "hectare", 4.9421, "acres", tolerance_pct=0.5)
+    assert res_ha["match"] is True
+
+    # 5. Raw Value & Unit Preservation (Never label 240 as acres)
+    norm = normalize_land_area(240, "Square Yards")
+    assert norm["raw_value"] == 240
+    assert norm["raw_unit"] == "Square Yards"
+    assert norm["normalized_acres"] != 240.0
+    assert norm["normalized_acres"] == round(240.0 / 4840.0, 4)
+

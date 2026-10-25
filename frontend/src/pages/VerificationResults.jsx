@@ -34,12 +34,16 @@ export default function VerificationResults({ activeDocument, verificationResult
   const verStatus = verData?.verification_status || (activeDocument ? "PENDING" : "UNVERIFIED");
   const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND" || verData?.reference_status === "NO_MATCHING_REFERENCE";
 
+  const docFields = activeDocument?.extracted_nlp_fields || activeDocument?.extracted_fields || {};
+  const docRawArea = docFields.land_area_raw || (docFields.land_area_unit ? `${docFields.land_area_numeric} ${docFields.land_area_unit}` : (docFields.land_area_acres ? `${docFields.land_area_acres} Acres` : null));
+  const docNormAcres = docFields.land_area_normalized_acres != null ? docFields.land_area_normalized_acres : docFields.land_area_acres;
+
   const matchedRec = verData?.matched_land_record || {
     owner_name: activeDocument ? (isReferenceNotFound ? "Unindexed in Demo Layer" : "Checking registry...") : "No Record",
-    survey_number: activeDocument?.extracted_nlp_fields?.survey_number || "N/A",
-    land_area_acres: activeDocument?.extracted_nlp_fields?.land_area_acres || 0.0,
-    village: activeDocument?.extracted_nlp_fields?.village || "N/A",
-    district: activeDocument?.extracted_nlp_fields?.district || "N/A"
+    survey_number: docFields.survey_number || "N/A",
+    land_area_acres: docNormAcres || 0.0,
+    village: docFields.village || "N/A",
+    district: docFields.district || "N/A"
   };
 
   const fieldMatches = verData?.field_matches || {
@@ -129,12 +133,22 @@ export default function VerificationResults({ activeDocument, verificationResult
             </div>
 
             <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
-              <span className="text-[11px] font-bold uppercase text-slate-500 block">Registered Land Area</span>
-              <span className="text-base font-bold text-white mt-1 block">
-                {isReferenceNotFound ? "N/A" : `${matchedRec.land_area_acres} Acres`}
+              <span className="text-[11px] font-bold uppercase text-slate-500 block">Land Area Comparison</span>
+              <span className="text-sm font-bold text-white mt-1 block">
+                Govt: {isReferenceNotFound ? "N/A" : `${matchedRec.land_area_acres} Acres`}
               </span>
-              <span className={`text-xs font-medium ${isReferenceNotFound ? 'text-slate-400' : fieldMatches.land_area_match ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {isReferenceNotFound ? "No baseline" : fieldMatches.land_area_match ? "Area Matched" : "Area Discrepancy"}
+              <div className="text-xs text-slate-300 mt-0.5">
+                <span className="text-slate-400">Doc: </span>
+                {docRawArea ? (
+                  !docRawArea.toLowerCase().includes("acre") && docNormAcres != null
+                    ? <span><strong className="text-blue-300 font-bold">{docRawArea}</strong> <span className="text-[11px] font-mono text-slate-400">(≈ {Number(docNormAcres).toFixed(4)} Ac)</span></span>
+                    : <strong className="text-blue-300 font-bold">{docRawArea}</strong>
+                ) : (
+                  <span className="text-slate-500">Not specified</span>
+                )}
+              </div>
+              <span className={`text-[11px] font-medium mt-1 block ${isReferenceNotFound ? 'text-slate-400' : fieldMatches.land_area_match ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isReferenceNotFound ? "No registry baseline" : fieldMatches.land_area_match ? "✓ Area Matched" : "⚠ Discrepancy Flagged"}
               </span>
             </div>
 
