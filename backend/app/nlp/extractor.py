@@ -41,8 +41,8 @@ class NLPInformationExtractor:
                 r"(?:VENDOR|SELLER|EXECUTANT)\s*(?:NAME)?\s*(?:\([^\)\n]*\))?\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z\s\.\']{3,45}?)(?=\s*\(|\n|\,|\s+SON|\s+S\/O|\s+W\/O|$)",
             ],
             "survey_number": [
-                r"(?:CLAIMED\s+SURVEY[A-Z]*|SURVEY\s*(?:NO\.?|NUMBER)?|SY\s*NO\.?|PLOT\s*NO\.?)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9\-]+\/[0-9A-Za-z]+|[0-9]{1,4}\/[0-9A-Z]+|[0-9]{1,4})",
-                r"(?:SURVEY|PLOT)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9\-]+\/[0-9A-Za-z]+|[0-9]{1,4}\/[0-9A-Z]+|[0-9]{1,4})"
+                r"(?:CLAIMED\s+SURVEY[A-Z]*|SURVEY\s*(?:NO\.?|NUMBER)?|SY\s*NO\.?|PLOT\s*NO\.?)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9]+(?:[\-\/][A-Za-z0-9]+)+|[A-Za-z0-9\-]+\/[0-9A-Za-z]+|[0-9]{1,4}\/[0-9A-Z]+|[0-9]{1,4})",
+                r"(?:SURVEY|PLOT)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9]+(?:[\-\/][A-Za-z0-9]+)+|[A-Za-z0-9\-]+\/[0-9A-Za-z]+|[0-9]{1,4}\/[0-9A-Z]+|[0-9]{1,4})"
             ],
             "land_area": [
                 r"(?:CLAIMED\s+EXTENT|LAND\s+AREA|TOTAL\s+AREA|EXTENT|TOTAL\s+EXTENT|AREA)\s*[\:\-\.]*\s*(?:\n\s*)?([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z\s\.]+)?(?=\n|\,|\;|$)",

@@ -12,6 +12,8 @@ from app.database import Base
 from app.models import LandRecord, OwnershipHistory, DocumentRecord
 from app.verification.engine import verification_engine
 from app.risk_scoring.engine import risk_scoring_engine
+from app.ocr.processor import process_document_ocr
+from app.nlp.extractor import nlp_engine
 
 
 @pytest.fixture(scope="module")
@@ -407,3 +409,78 @@ def test_scenario_e_multiple_uploads_isolation_no_data_leakage(test_db):
     assert score_a_retest["risk_score"] == 0
     assert score_a_retest["verification_status"] == "VERIFIED"
     assert score_a_retest["matched_land_record"]["owner_name"] == "Arun Kumar"
+
+
+def test_unindexed_synthetic_pdf_file_pipeline(test_db):
+    """
+    Direct end-to-end pipeline test on the actual synthetic PDF file:
+    test_documents/LandGuard_Synthetic_Test_Unindexed_Record.pdf.
+    Verifies that OCR extracts the text, NLP extracts Praveen Reddy and SY-UNINDEXED-999,
+    and verification flags REFERENCE_NOT_FOUND with 0 penalty risk points.
+    """
+    pdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "test_documents", "LandGuard_Synthetic_Test_Unindexed_Record.pdf"))
+    assert os.path.exists(pdf_path), f"Sample unindexed synthetic PDF missing at {pdf_path}"
+
+    # 1. OCR Extraction
+    ocr_res = process_document_ocr(pdf_path)
+    assert ocr_res["status"] == "COMPLETED"
+    assert ocr_res["engine"] == "LandGuard Digital PDF Engine"
+    assert ocr_res["confidence"] >= 90.0
+
+    raw_text = ocr_res["text"]
+    assert "Praveen Reddy" in raw_text
+    assert "SY-UNINDEXED-999" in raw_text
+    assert "1.50 acres" in raw_text
+    assert "Demo Village" in raw_text
+    assert "Demo District" in raw_text
+    assert "SYNTHETIC TEST DOCUMENT — NOT A REAL LAND RECORD" in raw_text
+
+    # 2. NLP Information Extraction
+    nlp_res = nlp_engine.extract_information(raw_text)
+    fields = nlp_res["extracted_fields"]
+    assert fields.get("owner_name") == "Praveen Reddy"
+    assert fields.get("survey_number") == "SY-UNINDEXED-999"
+    assert fields.get("land_area_raw") == "1.50 acres"
+    assert fields.get("land_area_unit") == "acres"
+    assert fields.get("land_area_numeric") == 1.5
+    assert fields.get("village") == "Demo Village"
+    assert fields.get("district") == "Demo District"
+
+    # 3. Verification Engine
+    ver_res = verification_engine.verify_extracted_attributes(
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        land_area=fields.get("land_area_numeric"),
+        land_area_unit=fields.get("land_area_unit"),
+        land_area_raw=fields.get("land_area_raw"),
+        doc_village=fields.get("village"),
+        doc_district=fields.get("district"),
+        document_id="DOC-TEST-FILE-UNINDEXED-001",
+        db=test_db
+    )
+    assert ver_res["verification_status"] == "REFERENCE_NOT_FOUND"
+    assert ver_res["verification_outcome"] == "REFERENCE_NOT_FOUND"
+    assert ver_res["reference_status"] == "NO_MATCHING_REFERENCE"
+    assert len(ver_res["record_inconsistencies"]) == 0
+    assert len(ver_res["reference_notices"]) > 0
+
+    # 4. Ingest and Test Risk Assessment
+    _insert_test_doc(
+        db=test_db,
+        doc_id="DOC-TEST-FILE-UNINDEXED-001",
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        area_num=fields.get("land_area_numeric"),
+        area_raw=fields.get("land_area_raw"),
+        area_unit=fields.get("land_area_unit"),
+        norm_acres=fields.get("land_area_acres"),
+        text=raw_text
+    )
+
+    risk_res = risk_scoring_engine.compute_risk_assessment("DOC-TEST-FILE-UNINDEXED-001", test_db)
+    assert risk_res["risk_score"] == 0
+    assert risk_res["risk_level"] == "LOW"
+    assert risk_res["verification_status"] == "REFERENCE_NOT_FOUND"
+    assert "Unindexed in Reference Registry" in risk_res["status_summary"]
+    assert "Unindexed parcel in demonstration registry" in risk_res["recommendation"]
+
