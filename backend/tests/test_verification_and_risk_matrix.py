@@ -484,3 +484,86 @@ def test_unindexed_synthetic_pdf_file_pipeline(test_db):
     assert "Unindexed in Reference Registry" in risk_res["status_summary"]
     assert "Unindexed parcel in demonstration registry" in risk_res["recommendation"]
 
+
+def test_suspicious_synthetic_pdf_file_pipeline(test_db):
+    """
+    Direct end-to-end pipeline test on the suspicious synthetic PDF file:
+    test_documents/LandGuard_Synthetic_Suspicious_Test_Record.pdf.
+    Verifies that OCR extracts the text, NLP extracts Fictional Test Owner and 101/A with 12.50 acres,
+    and verification flags SUSPICIOUS with OWNER_NAME_MISMATCH (+25), LAND_AREA_MISMATCH (+20),
+    and UNFOUND_SELLER_IN_HISTORY (+15), totaling a risk score of 60 (HIGH).
+    """
+    pdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "test_documents", "LandGuard_Synthetic_Suspicious_Test_Record.pdf"))
+    assert os.path.exists(pdf_path), f"Sample suspicious synthetic PDF missing at {pdf_path}"
+
+    # 1. OCR Extraction
+    ocr_res = process_document_ocr(pdf_path)
+    assert ocr_res["status"] == "COMPLETED"
+    assert ocr_res["engine"] == "LandGuard Digital PDF Engine"
+    assert ocr_res["confidence"] >= 90.0
+
+    raw_text = ocr_res["text"]
+    assert "Fictional Test Owner" in raw_text
+    assert "101/A" in raw_text
+    assert "12.50 acres" in raw_text
+    assert "Greenvalley" in raw_text
+    assert "Ranga Reddy" in raw_text
+    assert "SYNTHETIC TEST DOCUMENT — NOT A REAL LAND RECORD" in raw_text
+
+    # 2. NLP Extraction
+    nlp_res = nlp_engine.extract_information(raw_text)
+    fields = nlp_res["extracted_fields"]
+    assert fields.get("owner_name") == "Fictional Test Owner"
+    assert fields.get("survey_number") == "101/A"
+    assert fields.get("land_area_raw") == "12.50 acres"
+    assert fields.get("land_area_numeric") == 12.5
+    assert fields.get("village") == "Greenvalley"
+
+    # 3. Verification Engine
+    ver_res = verification_engine.verify_extracted_attributes(
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        land_area=fields.get("land_area_numeric"),
+        land_area_unit=fields.get("land_area_unit"),
+        land_area_raw=fields.get("land_area_raw"),
+        doc_village=fields.get("village"),
+        doc_district=fields.get("district"),
+        document_id="DOC-TEST-FILE-SUSPICIOUS-001",
+        db=test_db
+    )
+
+    assert ver_res["verification_status"] == "SUSPICIOUS"
+    assert ver_res["verification_outcome"] == "MISMATCH"
+    assert ver_res["reference_status"] == "MATCHED"
+    assert ver_res["matched_record_id"] == "REC-1001"
+    assert ver_res["field_matches"]["owner_match"] is False
+    assert ver_res["field_matches"]["land_area_match"] is False
+    assert ver_res["field_matches"]["survey_number_match"] is True
+
+    inc_types = [inc["type"] for inc in ver_res["record_inconsistencies"]]
+    assert "OWNER_NAME_MISMATCH" in inc_types
+    assert "LAND_AREA_MISMATCH" in inc_types
+    assert "UNFOUND_SELLER_IN_HISTORY" in inc_types
+
+    # 4. Ingest and Test Risk Assessment
+    _insert_test_doc(
+        db=test_db,
+        doc_id="DOC-TEST-FILE-SUSPICIOUS-001",
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        area_num=fields.get("land_area_numeric"),
+        area_raw=fields.get("land_area_raw"),
+        area_unit=fields.get("land_area_unit"),
+        norm_acres=fields.get("land_area_acres"),
+        text=raw_text
+    )
+
+    risk_res = risk_scoring_engine.compute_risk_assessment("DOC-TEST-FILE-SUSPICIOUS-001", test_db)
+    assert risk_res["risk_score"] == 60
+    assert risk_res["risk_level"] == "HIGH"
+    assert risk_res["verification_status"] == "SUSPICIOUS"
+    assert risk_res["inconsistency_score"] == 60
+    assert "Flagged with Record Inconsistencies" in risk_res["status_summary"]
+    assert "Further verification required" in risk_res["recommendation"]
+
+
