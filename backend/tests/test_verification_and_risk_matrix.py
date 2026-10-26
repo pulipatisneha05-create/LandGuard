@@ -44,16 +44,55 @@ def test_db():
         ),
         LandRecord(
             record_id="REC-1011",
-            owner_name="Kiran Mazumdar",
+            owner_name="Rajesh Kumar Sharma",
             survey_number="402/B",
-            land_area_acres=2.00,
-            village="Riverside",
-            mandal="Ibrahimpatnam",
+            land_area_acres=2.45,
+            village="Gachibowli",
+            mandal="Serilingampally",
             district="Ranga Reddy",
             state="Telangana",
-            registration_number="REG-2023-01160",
-            registration_date=date(2023, 4, 10),
+            registration_number="DOC-2026-8901",
+            registration_date=date(2023, 5, 14),
             document_type="Sale Deed"
+        ),
+        LandRecord(
+            record_id="REC-118A",
+            owner_name="Venkat Swamy Goud",
+            survey_number="118/A",
+            land_area_acres=0.50,
+            village="Gachibowli",
+            mandal="Serilingampally",
+            district="Ranga Reddy",
+            state="Telangana",
+            registration_number="DOC-ROR-2024-118A",
+            registration_date=date(2024, 5, 12),
+            document_type="Patta Passbook"
+        ),
+        LandRecord(
+            record_id="REC-304C",
+            owner_name="Anuradha Rao",
+            survey_number="304/C",
+            land_area_acres=3.50,
+            village="Kondapur",
+            mandal="Serilingampally",
+            district="Ranga Reddy",
+            state="Telangana",
+            registration_number="EC-2026-8812",
+            registration_date=date(2026, 10, 15),
+            document_type="Encumbrance Certificate"
+        ),
+        LandRecord(
+            record_id="SYN-REC-001",
+            owner_name="Kalyan Varma Dantuluri",
+            survey_number="SYN-101/A",
+            land_area_acres=2.20,
+            village="Narsingi",
+            mandal="Gandipet",
+            district="Ranga Reddy",
+            state="Telangana",
+            registration_number="SYN-REG-2016-1001",
+            registration_date=date(2017, 2, 2),
+            document_type="Gift Deed"
         ),
         # Duplicate registration records for 501/A
         LandRecord(
@@ -127,6 +166,62 @@ def test_db():
             owner_name="Arun Kumar",
             transfer_date=date(2026, 9, 15),
             transfer_type="Sale Deed"
+        ),
+        OwnershipHistory(
+            history_id="HIST-011",
+            survey_number="402/B",
+            owner_name="Subhash Sharma",
+            transfer_date=date(2005, 7, 14),
+            transfer_type="Original Grant"
+        ),
+        OwnershipHistory(
+            history_id="HIST-012",
+            survey_number="402/B",
+            owner_name="Rajesh Kumar Sharma",
+            transfer_date=date(2023, 5, 14),
+            transfer_type="Sale Deed"
+        ),
+        OwnershipHistory(
+            history_id="HIST-118A-1",
+            survey_number="118/A",
+            owner_name="Mallaiah Goud",
+            transfer_date=date(1998, 4, 10),
+            transfer_type="Original Grant"
+        ),
+        OwnershipHistory(
+            history_id="HIST-118A-2",
+            survey_number="118/A",
+            owner_name="Venkat Swamy Goud",
+            transfer_date=date(2024, 5, 12),
+            transfer_type="Patta Passbook"
+        ),
+        OwnershipHistory(
+            history_id="HIST-304C-1",
+            survey_number="304/C",
+            owner_name="K. S. Rao",
+            transfer_date=date(2010, 1, 5),
+            transfer_type="Original Grant"
+        ),
+        OwnershipHistory(
+            history_id="HIST-304C-2",
+            survey_number="304/C",
+            owner_name="Anuradha Rao",
+            transfer_date=date(2026, 10, 15),
+            transfer_type="Sale Deed"
+        ),
+        OwnershipHistory(
+            history_id="SYN-HIST-001",
+            survey_number="SYN-101/A",
+            owner_name="Dantuluri Narayana Rao",
+            transfer_date=date(1996, 2, 2),
+            transfer_type="Ancestral Partition"
+        ),
+        OwnershipHistory(
+            history_id="SYN-HIST-002",
+            survey_number="SYN-101/A",
+            owner_name="Kalyan Varma Dantuluri",
+            transfer_date=date(2017, 2, 2),
+            transfer_type="Gift Deed"
         )
     ]
     db.add_all(histories)
@@ -565,5 +660,236 @@ def test_suspicious_synthetic_pdf_file_pipeline(test_db):
     assert risk_res["inconsistency_score"] == 60
     assert "Flagged with Record Inconsistencies" in risk_res["status_summary"]
     assert "Further verification required" in risk_res["recommendation"]
+
+
+def test_712_extract_synthetic_pdf_file_pipeline(test_db):
+    """
+    Direct end-to-end pipeline test on the Patta Passbook / RoR 1-B synthetic PDF:
+    sample_data/7_12_Extract_Survey_118.pdf.
+    Verifies that OCR extracts the text, NLP extracts Venkat Swamy Goud and 118/A with 20 Guntas (0.50 acres),
+    and verification flags VERIFIED (0 risk).
+    """
+    pdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sample_data", "7_12_Extract_Survey_118.pdf"))
+    assert os.path.exists(pdf_path), f"7_12 sample PDF missing at {pdf_path}"
+
+    ocr_res = process_document_ocr(pdf_path)
+    assert ocr_res["status"] == "COMPLETED"
+    raw_text = ocr_res["text"]
+    assert "Venkat Swamy Goud" in raw_text
+    assert "118/A" in raw_text
+    assert "20 Guntas" in raw_text
+
+    nlp_res = nlp_engine.extract_information(raw_text)
+    fields = nlp_res["extracted_fields"]
+    assert fields.get("owner_name") == "Venkat Swamy Goud"
+    assert fields.get("survey_number") == "118/A"
+    assert fields.get("land_area_unit").lower() in ["guntas", "guntha"]
+    assert pytest.approx(fields.get("land_area_acres"), 0.01) == 0.50
+
+    ver_res = verification_engine.verify_extracted_attributes(
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        land_area=fields.get("land_area_numeric"),
+        land_area_unit=fields.get("land_area_unit"),
+        land_area_raw=fields.get("land_area_raw"),
+        doc_village=fields.get("village"),
+        doc_district=fields.get("district"),
+        document_id="DOC-TEST-712-001",
+        db=test_db
+    )
+    assert ver_res["verification_status"] == "VERIFIED"
+    assert ver_res["verification_outcome"] == "VERIFIED_MATCH"
+    assert ver_res["reference_status"] == "MATCHED"
+    assert ver_res["matched_record_id"] == "REC-118A"
+
+    _insert_test_doc(
+        db=test_db,
+        doc_id="DOC-TEST-712-001",
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        area_num=fields.get("land_area_numeric"),
+        area_raw=fields.get("land_area_raw"),
+        area_unit=fields.get("land_area_unit"),
+        norm_acres=fields.get("land_area_acres"),
+        text=raw_text
+    )
+
+    risk_res = risk_scoring_engine.compute_risk_assessment("DOC-TEST-712-001", test_db)
+    assert risk_res["risk_score"] == 0
+    assert risk_res["risk_level"] == "LOW"
+    assert risk_res["verification_status"] == "VERIFIED"
+
+
+def test_encumbrance_certificate_synthetic_pdf_file_pipeline(test_db):
+    """
+    Direct end-to-end pipeline test on Encumbrance Certificate synthetic PDF:
+    sample_data/Encumbrance_Certificate_304C.pdf.
+    Verifies that OCR extracts the text, NLP extracts Anuradha Rao and 304/C with 3.50 Acres,
+    and verification flags VERIFIED (0 risk).
+    """
+    pdf_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sample_data", "Encumbrance_Certificate_304C.pdf"))
+    assert os.path.exists(pdf_path), f"EC sample PDF missing at {pdf_path}"
+
+    ocr_res = process_document_ocr(pdf_path)
+    assert ocr_res["status"] == "COMPLETED"
+    raw_text = ocr_res["text"]
+    assert "Anuradha Rao" in raw_text
+    assert "304/C" in raw_text
+    assert "3.50 Acres" in raw_text
+
+    nlp_res = nlp_engine.extract_information(raw_text)
+    fields = nlp_res["extracted_fields"]
+    assert fields.get("owner_name") == "Anuradha Rao"
+    assert fields.get("survey_number") == "304/C"
+    assert pytest.approx(fields.get("land_area_acres"), 0.01) == 3.50
+
+    ver_res = verification_engine.verify_extracted_attributes(
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        land_area=fields.get("land_area_numeric"),
+        land_area_unit=fields.get("land_area_unit"),
+        land_area_raw=fields.get("land_area_raw"),
+        doc_village=fields.get("village"),
+        doc_district=fields.get("district"),
+        document_id="DOC-TEST-EC-001",
+        db=test_db
+    )
+    assert ver_res["verification_status"] == "VERIFIED"
+    assert ver_res["verification_outcome"] == "VERIFIED_MATCH"
+    assert ver_res["reference_status"] == "MATCHED"
+    assert ver_res["matched_record_id"] == "REC-304C"
+
+    _insert_test_doc(
+        db=test_db,
+        doc_id="DOC-TEST-EC-001",
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        area_num=fields.get("land_area_numeric"),
+        area_raw=fields.get("land_area_raw"),
+        area_unit=fields.get("land_area_unit"),
+        norm_acres=fields.get("land_area_acres"),
+        text=raw_text
+    )
+
+    risk_res = risk_scoring_engine.compute_risk_assessment("DOC-TEST-EC-001", test_db)
+    assert risk_res["risk_score"] == 0
+    assert risk_res["risk_level"] == "LOW"
+    assert risk_res["verification_status"] == "VERIFIED"
+
+
+def test_sample_deed_image_pipeline(test_db):
+    """
+    Direct end-to-end pipeline test on scanned deed image:
+    sample_data/sample_deed.png.
+    Verifies that OCR extracts the text, NLP extracts Rajesh Kumar Sharma and 402/B with 2.45 Acres,
+    and verification flags VERIFIED (0 risk).
+    """
+    img_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sample_data", "sample_deed.png"))
+    assert os.path.exists(img_path), f"sample_deed.png missing at {img_path}"
+
+    ocr_res = process_document_ocr(img_path)
+    assert ocr_res["status"] == "COMPLETED"
+    raw_text = ocr_res["text"]
+
+    nlp_res = nlp_engine.extract_information(raw_text)
+    fields = nlp_res["extracted_fields"]
+    assert fields.get("owner_name") == "Rajesh Kumar Sharma"
+    assert fields.get("survey_number") == "402/B"
+    assert pytest.approx(fields.get("land_area_acres"), 0.01) == 2.45
+
+    ver_res = verification_engine.verify_extracted_attributes(
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        land_area=fields.get("land_area_numeric"),
+        land_area_unit=fields.get("land_area_unit"),
+        land_area_raw=fields.get("land_area_raw"),
+        doc_village=fields.get("village"),
+        doc_district=fields.get("district"),
+        document_id="DOC-TEST-SAMPLE-DEED-001",
+        db=test_db
+    )
+    assert ver_res["verification_status"] == "VERIFIED"
+    assert ver_res["verification_outcome"] == "VERIFIED_MATCH"
+    assert ver_res["reference_status"] == "MATCHED"
+    assert ver_res["matched_record_id"] == "REC-1011"
+
+    _insert_test_doc(
+        db=test_db,
+        doc_id="DOC-TEST-SAMPLE-DEED-001",
+        owner_name=fields.get("owner_name"),
+        survey_number=fields.get("survey_number"),
+        area_num=fields.get("land_area_numeric"),
+        area_raw=fields.get("land_area_raw"),
+        area_unit=fields.get("land_area_unit"),
+        norm_acres=fields.get("land_area_acres"),
+        text=raw_text
+    )
+
+    risk_res = risk_scoring_engine.compute_risk_assessment("DOC-TEST-SAMPLE-DEED-001", test_db)
+    assert risk_res["risk_score"] == 0
+    assert risk_res["risk_level"] == "LOW"
+    assert risk_res["verification_status"] == "VERIFIED"
+
+
+def test_all_selected_demo_samples_end_to_end(test_db):
+    """
+    Comprehensive regression test verifying that all demo documents
+    process without unhandled exceptions or 500 errors, producing their
+    exact expected classification outcome.
+    """
+    demo_samples = [
+        ("LandGuard_Synthetic_Test_Land_Record.pdf", "sample_data", "VERIFIED", 0, "LOW"),
+        ("7_12_Extract_Survey_118.pdf", "sample_data", "VERIFIED", 0, "LOW"),
+        ("Encumbrance_Certificate_304C.pdf", "sample_data", "VERIFIED", 0, "LOW"),
+        ("sample_deed.png", "sample_data", "VERIFIED", 0, "LOW"),
+        ("LandGuard_Synthetic_Suspicious_Test_Record.pdf", "test_documents", "SUSPICIOUS", 60, "HIGH"),
+        ("LandGuard_Synthetic_Test_Unindexed_Record.pdf", "test_documents", "REFERENCE_NOT_FOUND", 0, "LOW"),
+    ]
+
+    for fname, folder, expected_status, expected_risk, expected_risk_level in demo_samples:
+        fpath = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", folder, fname))
+        assert os.path.exists(fpath), f"Demo sample {fname} not found at {fpath}"
+
+        ocr_res = process_document_ocr(fpath)
+        assert ocr_res["status"] == "COMPLETED"
+        assert len(ocr_res["text"]) > 20
+
+        nlp_res = nlp_engine.extract_information(ocr_res["text"])
+        fields = nlp_res["extracted_fields"]
+
+        ver_res = verification_engine.verify_extracted_attributes(
+            owner_name=fields.get("owner_name"),
+            survey_number=fields.get("survey_number"),
+            land_area=fields.get("land_area_numeric"),
+            land_area_unit=fields.get("land_area_unit"),
+            land_area_raw=fields.get("land_area_raw"),
+            doc_village=fields.get("village"),
+            doc_district=fields.get("district"),
+            document_id=f"DOC-REGRESS-{fname}",
+            db=test_db
+        )
+
+        assert ver_res["verification_status"] == expected_status, (
+            f"Expected {expected_status} for {fname}, but got {ver_res['verification_status']}"
+        )
+
+        _insert_test_doc(
+            db=test_db,
+            doc_id=f"DOC-REGRESS-{fname}",
+            owner_name=fields.get("owner_name"),
+            survey_number=fields.get("survey_number"),
+            area_num=fields.get("land_area_numeric"),
+            area_raw=fields.get("land_area_raw"),
+            area_unit=fields.get("land_area_unit"),
+            norm_acres=fields.get("land_area_acres"),
+            text=ocr_res["text"]
+        )
+
+        risk_res = risk_scoring_engine.compute_risk_assessment(f"DOC-REGRESS-{fname}", test_db)
+        assert risk_res["risk_score"] == expected_risk, (
+            f"Expected risk {expected_risk} for {fname}, got {risk_res['risk_score']}"
+        )
+        assert risk_res["risk_level"] == expected_risk_level
+
 
 

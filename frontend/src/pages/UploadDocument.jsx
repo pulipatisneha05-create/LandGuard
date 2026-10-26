@@ -9,10 +9,60 @@ export default function UploadDocument({ onUploadSuccess }) {
   const [errorMessage, setErrorMessage] = useState(null);
 
   const sampleDeeds = [
-    { name: "LandGuard_Synthetic_Test_Land_Record.pdf", size: "28 KB", type: "Sale Deed", status: "Synthetic Test PDF (Arun Kumar - 240 Sq Yds)", staticFile: "LandGuard_Synthetic_Test_Land_Record.pdf" },
-    { name: "sample_deed.png", size: "28 KB", type: "Sale Deed (Image)", status: "Synthetic Scanned Deed Image (Rajesh Kumar - Survey 402/B)", staticFile: "sample_deed.png" },
-    { name: "7_12_Extract_Survey_118.pdf", size: "1.8 MB", type: "Patta Passbook", status: "Synthetic RoR (Venkat Swamy - 20 Guntas)" },
-    { name: "Encumbrance_Certificate_304C.pdf", size: "1.2 MB", type: "Encumbrance Certificate", status: "Synthetic EC (Anuradha Rao - 3.5 Acres)" }
+    {
+      name: "LandGuard_Synthetic_Test_Land_Record.pdf",
+      size: "28 KB",
+      type: "Sale Deed",
+      category: "Normal Match",
+      badgeColor: "emerald",
+      status: "Arun Kumar • SY-TEST-104/2 • 240 Sq Yds (0.05 Ac)",
+      staticFile: "LandGuard_Synthetic_Test_Land_Record.pdf"
+    },
+    {
+      name: "7_12_Extract_Survey_118.pdf",
+      size: "3.5 KB",
+      type: "Patta Passbook",
+      category: "Normal Match",
+      badgeColor: "emerald",
+      status: "Venkat Swamy • Survey 118/A • 20 Guntas (0.50 Ac)",
+      staticFile: "7_12_Extract_Survey_118.pdf"
+    },
+    {
+      name: "Encumbrance_Certificate_304C.pdf",
+      size: "3.6 KB",
+      type: "Encumbrance Certificate",
+      category: "Normal Match",
+      badgeColor: "emerald",
+      status: "Anuradha Rao • Survey 304/C • 3.50 Acres",
+      staticFile: "Encumbrance_Certificate_304C.pdf"
+    },
+    {
+      name: "sample_deed.png",
+      size: "28 KB",
+      type: "Sale Deed (Image)",
+      category: "Normal Match",
+      badgeColor: "emerald",
+      status: "Rajesh Kumar • Survey 402/B • 2.45 Acres",
+      staticFile: "sample_deed.png"
+    },
+    {
+      name: "LandGuard_Synthetic_Suspicious_Test_Record.pdf",
+      size: "4.5 KB",
+      type: "Sale Deed",
+      category: "Suspicious Anomaly Test",
+      badgeColor: "rose",
+      status: "Fictional Owner • 101/A • 12.50 Ac (Mismatch vs 2.50 Ac)",
+      staticFile: "LandGuard_Synthetic_Suspicious_Test_Record.pdf"
+    },
+    {
+      name: "LandGuard_Synthetic_Test_Unindexed_Record.pdf",
+      size: "4.2 KB",
+      type: "Sale Deed",
+      category: "Unmatched / Unindexed Test",
+      badgeColor: "sky",
+      status: "Praveen Reddy • SY-UNINDEXED-999 • Reference Not Found",
+      staticFile: "LandGuard_Synthetic_Test_Unindexed_Record.pdf"
+    }
   ];
 
   const handleFileDrop = (e) => {
@@ -34,7 +84,7 @@ export default function UploadDocument({ onUploadSuccess }) {
   const handleSelectSample = async (sample) => {
     setErrorMessage(null);
 
-    // Try fetching the actual static sample file if available in public/samples
+    // Fetch the actual static sample file from public/samples
     if (sample.staticFile) {
       try {
         const resp = await fetch(`/samples/${sample.staticFile}`);
@@ -43,26 +93,18 @@ export default function UploadDocument({ onUploadSuccess }) {
           const mimeType = sample.staticFile.endsWith('.png') ? 'image/png' : 'application/pdf';
           const file = new File([blob], sample.name, { type: mimeType });
           setSelectedFile(file);
-          setDocumentType(sample.type);
+          const mappedType = sample.type.includes('Passbook')
+            ? 'Patta Passbook'
+            : sample.type.includes('Encumbrance')
+            ? 'Encumbrance Certificate'
+            : 'Sale Deed';
+          setDocumentType(mappedType);
           return;
         }
       } catch (err) {
-        console.info("Static sample fetch notice, falling back to embedded generator:", err);
+        console.warn("Static sample fetch notice, falling back:", err);
       }
     }
-
-    let textContent = "";
-    if (sample.name.includes("LandGuard_Synthetic_Test")) {
-      textContent = "SYNTHETIC SAMPLE — LAND RECORD TEST DOCUMENT\nRecord ID: LG-TEST-0001\nOwner name: Arun Kumar\nSurvey number: SY-TEST-104/2\nLand area: 240 square yards\nVillage / locality: Green Valley\nDistrict: Demo District\nDocument number: DOC-TEST-2026-001\nDocument date: 15 September 2026\nBoundary - North: Demo Plot SY-TEST-103\nBoundary - South: Demo Road\nBoundary - East: Demo Plot SY-TEST-105\nBoundary - West: Demo Drain";
-    } else if (sample.name.includes("7_12") || sample.name.includes("Survey_118")) {
-      textContent = "TELANGANA LAND REVENUE ADMINISTRATION - DHARANI PORTAL\nPATTADAR PASSBOOK CUM TITLE DEED\nROR 1-B NAMUNA EXTRACT\nPassbook Number: T19050012345\nPattadar Name: Venkat Swamy Goud\nFather's Name: Mallaiah Goud\nSurvey Number: 118/A\nTotal Extent: 20 Guntas\nKhata Number: KH-409\nVillage: Gachibowli, Mandal: Serilingampally, District: Ranga Reddy";
-    } else {
-      textContent = "GOVERNMENT OF TELANGANA - REGISTRATION AND STAMPS DEPARTMENT\nSTATEMENT OF ENCUMBRANCE ON PROPERTY (FORM NO. 32)\nCertificate No: EC-2026-8812\nApplication Number: APP-7712\nSearch Period: 01-Jan-2010 to 15-Oct-2026\nOwner / Title Holder: Smt. Anuradha Rao\nSurvey Number: 304/C\nExtent: 3.50 Acres\nVillage: Kondapur, Mandal: Serilingampally, District: Ranga Reddy\nEncumbrance Status: NIL ENCUMBRANCE (Nil certificate issued)";
-    }
-    const sampleBlob = new Blob([textContent], { type: "text/plain" });
-    const file = new File([sampleBlob], sample.name, { type: "text/plain" });
-    setSelectedFile(file);
-    setDocumentType(sample.type);
   };
 
   const handleStartAnalysis = async () => {
@@ -170,30 +212,49 @@ export default function UploadDocument({ onUploadSuccess }) {
       {/* Quick Select Sample Deed */}
       <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">Or Select a Sample Test Deed</h3>
-          <span className="text-[11px] text-slate-400">Pre-configured test documents</span>
+          <h3 className="text-sm font-bold text-white">Select Prototype Demonstration Sample</h3>
+          <span className="text-[11px] text-slate-400">All 6 pre-verified academic demo documents</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {sampleDeeds.map((sample, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSelectSample(sample)}
-              className={`p-3 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                selectedFile?.name === sample.name
-                  ? 'border-blue-500 bg-blue-950/40 text-blue-200'
-                  : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 text-slate-300'
-              }`}
-            >
-              <div>
-                <div className="text-xs font-bold text-white truncate">{sample.name}</div>
-                <div className="text-[11px] text-slate-400">{sample.type} • {sample.size}</div>
-              </div>
-              <span className="text-[10px] font-semibold mt-2 px-2 py-0.5 rounded bg-slate-800 text-slate-300 w-fit">
-                {sample.status}
-              </span>
-            </button>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {sampleDeeds.map((sample, idx) => {
+            const isSelected = selectedFile?.name === sample.name;
+            const badgeClasses = 
+              sample.badgeColor === 'emerald'
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                : sample.badgeColor === 'rose'
+                ? 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                : 'bg-sky-950/80 text-sky-300 border-sky-700/60';
+
+            return (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSelectSample(sample)}
+                className={`p-3.5 rounded-xl border text-left flex flex-col justify-between transition-all gap-2 ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-950/50 shadow-md shadow-blue-950/50'
+                    : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 hover:bg-slate-900/60'
+                }`}
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeClasses}`}>
+                      {sample.category}
+                    </span>
+                    <span className="text-[10px] text-slate-500">{sample.size}</span>
+                  </div>
+                  <div className="text-xs font-bold text-white truncate" title={sample.name}>
+                    {sample.name}
+                  </div>
+                  <div className="text-[11px] text-slate-400">{sample.type}</div>
+                </div>
+                <div className="text-[10px] font-medium text-slate-400 pt-1.5 border-t border-slate-800/80">
+                  {sample.status}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -209,6 +270,7 @@ export default function UploadDocument({ onUploadSuccess }) {
             <option value="Sale Deed">Registered Sale Deed</option>
             <option value="7/12 Extract">7/12 Revenue Extract / RoR</option>
             <option value="Patta Passbook">Patta Passbook / Title Certificate</option>
+            <option value="Encumbrance Certificate">Encumbrance Certificate (EC)</option>
             <option value="Gift Deed">Gift / Partition Deed</option>
           </select>
         </div>

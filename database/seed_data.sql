@@ -15,7 +15,7 @@ INSERT INTO land_records (record_id, owner_name, survey_number, land_area_acres,
 ('REC-1008', 'Harish Chandra', '301/A', 1.50, 'Meadowlands', 'Kandukur', 'Ranga Reddy', 'Telangana', 'REG-2020-00830', '2020-12-01', 'Sale Deed'),
 ('REC-1009', 'Indira Nair', '302/X', 3.80, 'Meadowlands', 'Kandukur', 'Ranga Reddy', 'Telangana', 'REG-2022-00945', '2022-05-18', 'Partition Deed'),
 ('REC-1010', 'Jayant Joshi', '401/A', 1.80, 'Riverside', 'Ibrahimpatnam', 'Ranga Reddy', 'Telangana', 'REG-2019-01050', '2019-02-28', 'Sale Deed'),
-('REC-1011', 'Kiran Mazumdar', '402/B', 2.00, 'Riverside', 'Ibrahimpatnam', 'Ranga Reddy', 'Telangana', 'REG-2023-01160', '2023-04-10', 'Sale Deed'),
+('REC-1011', 'Rajesh Kumar Sharma', '402/B', 2.45, 'Gachibowli', 'Serilingampally', 'Ranga Reddy', 'Telangana', 'DOC-2026-8901', '2023-05-14', 'Sale Deed'),
 ('REC-1012', 'Lokesh Gupta', '501/A', 4.00, 'Forest Edge', 'Moinabad', 'Ranga Reddy', 'Telangana', 'REG-2021-01270', '2021-10-15', 'Sale Deed'),
 ('REC-1013', 'Madhav Singh', '501/A', 4.00, 'Forest Edge', 'Moinabad', 'Ranga Reddy', 'Telangana', 'REG-2023-01380', '2023-11-20', 'Sale Deed'),
 ('REC-1014', 'Nitin Saxena', '601/A', 2.75, 'Highland', 'Chevella', 'Ranga Reddy', 'Telangana', 'REG-2024-01490', '2024-01-10', 'Sale Deed'),
@@ -27,7 +27,10 @@ INSERT INTO land_records (record_id, owner_name, survey_number, land_area_acres,
 ('REC-1020', 'Suresh Babu', '802/B', 1.10, 'Sunrise', 'Farooqnagar', 'Ranga Reddy', 'Telangana', 'REG-2023-02055', '2023-09-09', 'Sale Deed'),
 ('REC-1021', 'Tarun Chawla', '901/A', 2.90, 'Lakeside', 'Hayathnagar', 'Ranga Reddy', 'Telangana', 'REG-2022-02166', '2022-11-30', 'Sale Deed'),
 ('REC-1022', 'Uma Devi', '902/B', 4.80, 'Lakeside', 'Hayathnagar', 'Ranga Reddy', 'Telangana', 'REG-2019-02277', '2019-08-17', 'Gift Deed'),
-('REC-TEST-1042', 'Arun Kumar', 'SY-TEST-104/2', 0.0496, 'Green Valley', 'Demo Mandal', 'Demo District', 'Telangana', 'DOC-TEST-2026-001', '2026-09-15', 'Sale Deed')
+('REC-TEST-1042', 'Arun Kumar', 'SY-TEST-104/2', 0.0496, 'Green Valley', 'Demo Mandal', 'Demo District', 'Telangana', 'DOC-TEST-2026-001', '2026-09-15', 'Sale Deed'),
+('REC-118A', 'Venkat Swamy Goud', '118/A', 0.50, 'Gachibowli', 'Serilingampally', 'Ranga Reddy', 'Telangana', 'DOC-ROR-2024-118A', '2024-05-12', 'Patta Passbook'),
+('REC-304C', 'Anuradha Rao', '304/C', 3.50, 'Kondapur', 'Serilingampally', 'Ranga Reddy', 'Telangana', 'EC-2026-8812', '2026-10-15', 'Encumbrance Certificate'),
+('SYN-REC-001', 'Kalyan Varma Dantuluri', 'SYN-101/A', 2.20, 'Narsingi', 'Gandipet', 'Ranga Reddy', 'Telangana', 'SYN-REG-2016-1001', '2017-02-02', 'Gift Deed')
 ON CONFLICT (record_id) DO NOTHING;
 
 
@@ -43,8 +46,8 @@ INSERT INTO ownership_history (history_id, survey_number, owner_name, transfer_d
 ('HIST-008', '301/A', 'Harish Chandra', '2020-12-01', 'Sale Deed'),
 ('HIST-009', '401/A', 'Mukund Joshi', '2002-01-12', 'Original Grant'),
 ('HIST-010', '401/A', 'Jayant Joshi', '2019-02-28', 'Inheritance Mutation'),
-('HIST-011', '402/B', 'Subhash Mazumdar', '2005-07-14', 'Original Grant'),
-('HIST-012', '402/B', 'Kiran Mazumdar', '2023-04-10', 'Sale Deed'),
+('HIST-011', '402/B', 'Subhash Sharma', '2005-07-14', 'Original Grant'),
+('HIST-012', '402/B', 'Rajesh Kumar Sharma', '2023-05-14', 'Sale Deed'),
 ('HIST-013', '501/A', 'Lokesh Gupta', '2021-10-15', 'Sale Deed'),
 ('HIST-014', '501/A', 'Madhav Singh', '2023-11-20', 'Duplicate Sale Deed'),
 ('HIST-015', '601/A', 'Anand Saxena', '2023-12-01', 'Original Sale'),
@@ -56,7 +59,13 @@ INSERT INTO ownership_history (history_id, survey_number, owner_name, transfer_d
 ('HIST-021', '901/A', 'Harpreet Chawla', '2010-09-05', 'Sale Deed'),
 ('HIST-022', '901/A', 'Tarun Chawla', '2022-11-30', 'Sale Deed'),
 ('HIST-TEST-1042-1', 'SY-TEST-104/2', 'Ram Kumar', '2015-06-10', 'Original Grant'),
-('HIST-TEST-1042-2', 'SY-TEST-104/2', 'Arun Kumar', '2026-09-15', 'Sale Deed')
+('HIST-TEST-1042-2', 'SY-TEST-104/2', 'Arun Kumar', '2026-09-15', 'Sale Deed'),
+('HIST-118A-1', '118/A', 'Mallaiah Goud', '1998-04-10', 'Original Grant'),
+('HIST-118A-2', '118/A', 'Venkat Swamy Goud', '2024-05-12', 'Patta Passbook'),
+('HIST-304C-1', '304/C', 'K. S. Rao', '2010-01-05', 'Original Grant'),
+('HIST-304C-2', '304/C', 'Anuradha Rao', '2026-10-15', 'Sale Deed'),
+('SYN-HIST-001', 'SYN-101/A', 'Dantuluri Narayana Rao', '1996-02-02', 'Ancestral Partition'),
+('SYN-HIST-002', 'SYN-101/A', 'Kalyan Varma Dantuluri', '2017-02-02', 'Gift Deed')
 ON CONFLICT (history_id) DO NOTHING;
 
 

@@ -58,13 +58,31 @@ ACRE_CONVERSIONS = {
 SQM_PER_ACRE = 4046.8564224
 
 
+OCR_UNIT_TYPOS = {
+    "reres": "acres",
+    "rere": "acres",
+    "aeres": "acres",
+    "acers": "acres",
+    "aces": "acres",
+    "gunts": "guntas",
+    "gunt": "guntas",
+    "gunthas": "guntas",
+    "guntha": "guntas",
+    "sqft": "square feet",
+    "sft": "square feet",
+}
+
+
 def clean_unit_string(unit_raw: Optional[str]) -> str:
     """Normalize raw unit string to standard lowercase key."""
     if not unit_raw:
         return "acres"
-    clean = re.sub(r"[,\.;:\-\(\)\[\]]+", " ", unit_raw.lower()).strip()
+    # Take only first line to avoid multiline capturing
+    first_line = unit_raw.split("\n")[0].strip()
+    clean = re.sub(r"[,\.;:\-\(\)\[\]]+", " ", first_line.lower()).strip()
     clean = re.sub(r"\s+", " ", clean)
-    return clean or "acres"
+    clean = OCR_UNIT_TYPOS.get(clean, clean)
+    return clean[:45] if clean else "acres"
 
 
 def parse_area_value_and_unit(area_str: str) -> Tuple[Optional[float], Optional[str], Optional[str]]:
@@ -87,7 +105,8 @@ def parse_area_value_and_unit(area_str: str) -> Tuple[Optional[float], Optional[
     except (ValueError, TypeError):
         return None, None, None
 
-    unit_raw = match.group(2).strip() if match.group(2) else "Acres"
+    raw_matched = match.group(2).strip() if match.group(2) else "Acres"
+    unit_raw = raw_matched.split("\n")[0].strip()[:45]
     unit_key = clean_unit_string(unit_raw)
 
     return val, unit_raw, unit_key

@@ -45,8 +45,8 @@ class NLPInformationExtractor:
                 r"(?:SURVEY|PLOT)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9]+(?:[\-\/][A-Za-z0-9]+)+|[A-Za-z0-9\-]+\/[0-9A-Za-z]+|[0-9]{1,4}\/[0-9A-Z]+|[0-9]{1,4})"
             ],
             "land_area": [
-                r"(?:CLAIMED\s+EXTENT|LAND\s+AREA|TOTAL\s+AREA|EXTENT|TOTAL\s+EXTENT|AREA)\s*[\:\-\.]*\s*(?:\n\s*)?([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z\s\.]+)?(?=\n|\,|\;|$)",
-                r"([0-9]+(?:\.[0-9]+)?)\s*(ACRES|ACRE|AC|SQUARE\s+YARDS|SQ\s+YARDS|SQ\.\s+YARDS|SQ\s+YDS|HECTARES|HA|GUNTAS|CENTS|SQ\s+FT|SQUARE\s+FEET)"
+                r"(?:CLAIMED\s+EXTENT|LAND\s+AREA|TOTAL\s+AREA|EXTENT|TOTAL\s+EXTENT|AREA)\s*[\:\-\.]*\s*(?:\n[^\S\r\n]*)?([0-9]+(?:\.[0-9]+)?)[^\S\r\n]*([A-Za-z\.\ ]+)?(?=\r?\n|\,|\;|$)",
+                r"([0-9]+(?:\.[0-9]+)?)\s*(ACRES|ACRE|AC|SQUARE\s+YARDS|SQ\s+YARDS|SQ\.\s+YARDS|SQ\s+YDS|HECTARES|HA|GUNTAS|GUNTHAS|GUNTA|CENTS|SQ\s+FT|SQUARE\s+FEET|RERES)"
             ],
             "village": [
                 r"(?:VILLAGE\s*(?:\/\s*LOCALITY)?|LOCALITY)\s*[\:\-\.]*\s*(?:\n\s*)?([A-Za-z0-9\s]{2,40}?)(?=\s*\(|\,|\s+MANDAL|\s+TALUK|\s+DISTRICT|\n|$)",

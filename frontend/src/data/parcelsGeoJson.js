@@ -32,6 +32,87 @@ export const fallbackGeoJson = {
     },
     {
       "type": "Feature",
+      "id": "PARCEL-118A",
+      "properties": {
+        "survey_number": "118/A",
+        "owner_name": "Venkat Swamy Goud",
+        "land_area_acres": 0.50,
+        "village": "Gachibowli",
+        "mandal": "Serilingampally",
+        "district": "Ranga Reddy",
+        "state": "Telangana",
+        "risk_level": "LOW",
+        "conflict_status": "Clean"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.352, 17.443],
+            [78.3535, 17.4435],
+            [78.354, 17.4415],
+            [78.3525, 17.441],
+            [78.352, 17.443]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "PARCEL-304C",
+      "properties": {
+        "survey_number": "304/C",
+        "owner_name": "Anuradha Rao",
+        "land_area_acres": 3.50,
+        "village": "Kondapur",
+        "mandal": "Serilingampally",
+        "district": "Ranga Reddy",
+        "state": "Telangana",
+        "risk_level": "LOW",
+        "conflict_status": "Clean"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.361, 17.462],
+            [78.3635, 17.4635],
+            [78.3645, 17.46],
+            [78.362, 17.459],
+            [78.361, 17.462]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "PARCEL-SYN-101A",
+      "properties": {
+        "survey_number": "SYN-101/A",
+        "owner_name": "Kalyan Varma Dantuluri",
+        "land_area_acres": 2.20,
+        "village": "Narsingi",
+        "mandal": "Gandipet",
+        "district": "Ranga Reddy",
+        "state": "Telangana",
+        "risk_level": "LOW",
+        "conflict_status": "Clean"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.371, 17.382],
+            [78.3735, 17.3835],
+            [78.3745, 17.38],
+            [78.372, 17.379],
+            [78.371, 17.382]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "PARCEL-101A",
       "properties": {
         "survey_number": "101/A",
@@ -245,14 +326,14 @@ export const fallbackGeoJson = {
       "id": "PARCEL-402B",
       "properties": {
         "survey_number": "402/B",
-        "owner_name": "Kiran Mazumdar",
-        "land_area_acres": 2.0,
-        "village": "Riverside",
-        "mandal": "Ibrahimpatnam",
+        "owner_name": "Rajesh Kumar Sharma",
+        "land_area_acres": 2.45,
+        "village": "Gachibowli",
+        "mandal": "Serilingampally",
         "district": "Ranga Reddy",
         "state": "Telangana",
-        "risk_level": "HIGH",
-        "conflict_status": "0.65 Acre Overlap Anomaly"
+        "risk_level": "LOW",
+        "conflict_status": "Clean"
       },
       "geometry": {
         "type": "Polygon",
