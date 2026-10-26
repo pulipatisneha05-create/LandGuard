@@ -5,6 +5,33 @@ export const fallbackGeoJson = {
   "features": [
     {
       "type": "Feature",
+      "id": "PARCEL-TEST-1042",
+      "properties": {
+        "survey_number": "SY-TEST-104/2",
+        "owner_name": "Arun Kumar",
+        "land_area_acres": 0.0496,
+        "village": "Green Valley",
+        "mandal": "Demo Mandal",
+        "district": "Demo District",
+        "state": "Telangana",
+        "risk_level": "LOW",
+        "conflict_status": "Clean"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.365, 17.442],
+            [78.3665, 17.4425],
+            [78.367, 17.4405],
+            [78.3655, 17.44],
+            [78.365, 17.442]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "PARCEL-101A",
       "properties": {
         "survey_number": "101/A",

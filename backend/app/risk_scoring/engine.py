@@ -64,14 +64,17 @@ class ExplainableRiskScoringEngine:
 
         for issue in detected_anomalies:
             issue_type = issue.get("type", "UNKNOWN")
+            category = issue.get("category", "")
 
-            if issue_type in self.ZERO_POINT_TYPES:
+            # Informational / Reference Status: explicitly 0 points
+            if category == "Reference Status" or issue_type in self.ZERO_POINT_TYPES:
                 info_breakdown.append({
                     "issue_type": issue_type,
                     "category": "Reference Status",
                     "title": issue.get("title", issue_type),
                     "severity": "Info",
                     "points_added": 0,
+                    "reason_for_points": "Informational notice: Parcel unindexed or reference baseline absent in demonstration registry; zero penalty assigned (not an indicator of fraud).",
                     "expected": issue.get("expected", ""),
                     "found": issue.get("found", ""),
                     "description": issue.get("description", "")
@@ -79,24 +82,27 @@ class ExplainableRiskScoringEngine:
             elif issue_type in self.INCONSISTENCY_WEIGHTS:
                 pts = self.INCONSISTENCY_WEIGHTS[issue_type]
                 inconsistency_score += pts
+                reason = self._get_inconsistency_reason(issue_type, pts)
                 inconsistency_breakdown.append({
                     "issue_type": issue_type,
                     "category": "Record Inconsistency",
                     "title": issue.get("title", issue_type),
                     "severity": issue.get("severity", "High"),
                     "points_added": pts,
+                    "reason_for_points": reason,
                     "expected": issue.get("expected", ""),
                     "found": issue.get("found", ""),
                     "description": issue.get("description", "")
                 })
-            elif issue_type in self.DATA_QUALITY_WEIGHTS:
-                pts = self.DATA_QUALITY_WEIGHTS[issue_type]
+            elif issue_type in self.DATA_QUALITY_WEIGHTS or category == "Data Quality Warning":
+                pts = self.DATA_QUALITY_WEIGHTS.get(issue_type, 5)
                 quality_score += pts
                 quality_breakdown.append({
                     "issue_type": issue_type,
                     "category": "Data Quality Warning",
                     "severity": issue.get("severity", "Medium"),
                     "points_added": pts,
+                    "reason_for_points": f"Data quality / legibility observation: {issue.get('title', issue_type)} (+{pts} pts).",
                     "expected": issue.get("expected", ""),
                     "found": issue.get("found", ""),
                     "description": issue.get("description", "")
@@ -110,6 +116,7 @@ class ExplainableRiskScoringEngine:
                     "title": issue.get("title", issue_type),
                     "severity": "Medium",
                     "points_added": pts,
+                    "reason_for_points": f"Unclassified anomaly (+{pts} pts).",
                     "description": issue.get("description", "")
                 })
 
@@ -160,6 +167,8 @@ class ExplainableRiskScoringEngine:
             "document_id": document_id,
             "verification_id": verification_id,
             "verification_status": ver_status,
+            "verification_outcome": verification_payload.get("verification_outcome", ver_status),
+            "status_summary": self.get_status_summary(ver_status, final_risk_score, risk_level),
             "risk_score": final_risk_score,
             "risk_level": risk_level,
             "recommendation": recommendation,
@@ -173,6 +182,30 @@ class ExplainableRiskScoringEngine:
             "matched_land_record": verification_payload.get("matched_land_record"),
             "disclaimer": "Student prototype / demonstration risk scoring engine. Not a substitute for authorized legal or government title search."
         }
+
+    def _get_inconsistency_reason(self, issue_type: str, pts: int) -> str:
+        reasons = {
+            "DUPLICATE_REGISTRATION_FLAGGED": f"Critical title risk: Multiple active registrations found for the same parcel (+{pts} pts).",
+            "OWNER_NAME_MISMATCH": f"High risk anomaly: Document executant differs from registered title owner (+{pts} pts).",
+            "SURVEY_NUMBER_MISMATCH": f"High risk anomaly: Document survey subdivision differs from registered reference parcel (+{pts} pts).",
+            "LAND_AREA_MISMATCH": f"High risk anomaly: Document land area extent deviates from registered reference extent (+{pts} pts).",
+            "SPATIAL_LOCATION_MISMATCH": f"High risk anomaly: Document claimed jurisdiction/village conflicts with GIS cadastral boundaries (+{pts} pts).",
+            "RAPID_OWNERSHIP_TRANSFER": f"Medium risk anomaly: Rapid successive deed transfer detected (<180 days) (+{pts} pts).",
+            "UNFOUND_SELLER_IN_HISTORY": f"High risk anomaly: Executant seller does not appear in recorded title chain (+{pts} pts).",
+            "UNFOUNDED_SELLER_IN_HISTORY": f"High risk anomaly: Executant seller does not appear in recorded title chain (+{pts} pts).",
+            "MISSING_HISTORICAL_TITLE_CHAIN": f"Medium risk anomaly: Parcel lacks prior transfer history records in database (+{pts} pts).",
+        }
+        return reasons.get(issue_type, f"Record discrepancy flagged (+{pts} pts).")
+
+    def get_status_summary(self, ver_status: str, score: int, level: str) -> str:
+        if ver_status == "REFERENCE_NOT_FOUND":
+            return f"Unindexed in Reference Registry (Risk Score: {score}/100 - Not Verified / Unindexed)"
+        elif ver_status == "VERIFIED":
+            return f"Verified Match against Reference Registry (Risk Score: {score}/100 - Low Risk)"
+        elif ver_status == "SUSPICIOUS":
+            return f"Flagged with Record Inconsistencies (Risk Score: {score}/100 - {level} Risk)"
+        else:
+            return f"Unverified / Incomplete Data (Risk Score: {score}/100 - Unverified)"
 
     def determine_risk_level(self, score: int) -> str:
         """
@@ -202,6 +235,8 @@ class ExplainableRiskScoringEngine:
         """
         if ver_status == "REFERENCE_NOT_FOUND":
             return "Unindexed parcel in demonstration registry: Manual physical inspection and registry verification recommended."
+        if ver_status in ["UNVERIFIED", "INCONCLUSIVE"]:
+            return "Incomplete document data: Ingestion could not extract sufficient cadastral keys for verification."
 
         if risk_level == "CRITICAL":
             return "Immediate detailed verification required"

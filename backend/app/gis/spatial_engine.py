@@ -101,6 +101,15 @@ class GISSpatialEngine:
                 return feature_copy
         return None
 
+    @staticmethod
+    def _clean_geo_name(name: str) -> str:
+        if not name:
+            return ""
+        import re
+        n = name.lower().strip()
+        n = re.sub(r"\b(district|dist\.?|mandal|village|taluk)\b", "", n)
+        return re.sub(r"[^\w\s]", "", n).strip()
+
     def verify_spatial_location(
         self,
         survey_number: Optional[str],
@@ -149,26 +158,32 @@ class GISSpatialEngine:
         gis_mandal = props.get("mandal", "")
         gis_district = props.get("district", "")
 
-        # 2. Location Mismatch Check
-        if doc_village and gis_village and doc_village.lower() != gis_village.lower():
-            anomalies.append({
-                "type": "SPATIAL_LOCATION_MISMATCH",
-                "severity": "High",
-                "title": "Village Spatial Boundary Mismatch",
-                "expected": f"GIS Boundary Village: '{gis_village}'",
-                "found": f"Document Claimed Village: '{doc_village}'",
-                "description": f"Document claims parcel location in Village '{doc_village}', but GIS boundary coordinates place Survey {survey_number} in Village '{gis_village}'."
-            })
+        # 2. Location Mismatch Check (with entity normalization)
+        if doc_village and gis_village:
+            c_doc_v = self._clean_geo_name(doc_village)
+            c_gis_v = self._clean_geo_name(gis_village)
+            if c_doc_v and c_gis_v and c_doc_v != c_gis_v and c_doc_v not in c_gis_v and c_gis_v not in c_doc_v:
+                anomalies.append({
+                    "type": "SPATIAL_LOCATION_MISMATCH",
+                    "severity": "High",
+                    "title": "Village Spatial Boundary Mismatch",
+                    "expected": f"GIS Boundary Village: '{gis_village}'",
+                    "found": f"Document Claimed Village: '{doc_village}'",
+                    "description": f"Document claims parcel location in Village '{doc_village}', but GIS boundary coordinates place Survey {survey_number} in Village '{gis_village}'."
+                })
 
-        if doc_district and gis_district and doc_district.lower() != gis_district.lower():
-            anomalies.append({
-                "type": "SPATIAL_LOCATION_MISMATCH",
-                "severity": "High",
-                "title": "District Jurisdiction Mismatch",
-                "expected": f"GIS Parcel District: '{gis_district}'",
-                "found": f"Document Claimed District: '{doc_district}'",
-                "description": f"Document claims District '{doc_district}', which differs from official GIS boundary District '{gis_district}'."
-            })
+        if doc_district and gis_district:
+            c_doc_d = self._clean_geo_name(doc_district)
+            c_gis_d = self._clean_geo_name(gis_district)
+            if c_doc_d and c_gis_d and c_doc_d != c_gis_d and c_doc_d not in c_gis_d and c_gis_d not in c_doc_d:
+                anomalies.append({
+                    "type": "SPATIAL_LOCATION_MISMATCH",
+                    "severity": "High",
+                    "title": "District Jurisdiction Mismatch",
+                    "expected": f"GIS Parcel District: '{gis_district}'",
+                    "found": f"Document Claimed District: '{doc_district}'",
+                    "description": f"Document claims District '{doc_district}', which differs from official GIS boundary District '{gis_district}'."
+                })
 
         spatial_match = len(anomalies) == 0
 

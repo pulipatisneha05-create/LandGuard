@@ -26,7 +26,8 @@ INSERT INTO land_records (record_id, owner_name, survey_number, land_area_acres,
 ('REC-1019', 'Rameshwar Prasad', '801/A', 6.50, 'Sunrise', 'Farooqnagar', 'Ranga Reddy', 'Telangana', 'REG-2017-01944', '2017-05-11', 'Inheritance Mutation'),
 ('REC-1020', 'Suresh Babu', '802/B', 1.10, 'Sunrise', 'Farooqnagar', 'Ranga Reddy', 'Telangana', 'REG-2023-02055', '2023-09-09', 'Sale Deed'),
 ('REC-1021', 'Tarun Chawla', '901/A', 2.90, 'Lakeside', 'Hayathnagar', 'Ranga Reddy', 'Telangana', 'REG-2022-02166', '2022-11-30', 'Sale Deed'),
-('REC-1022', 'Uma Devi', '902/B', 4.80, 'Lakeside', 'Hayathnagar', 'Ranga Reddy', 'Telangana', 'REG-2019-02277', '2019-08-17', 'Gift Deed')
+('REC-1022', 'Uma Devi', '902/B', 4.80, 'Lakeside', 'Hayathnagar', 'Ranga Reddy', 'Telangana', 'REG-2019-02277', '2019-08-17', 'Gift Deed'),
+('REC-TEST-1042', 'Arun Kumar', 'SY-TEST-104/2', 0.0496, 'Green Valley', 'Demo Mandal', 'Demo District', 'Telangana', 'DOC-TEST-2026-001', '2026-09-15', 'Sale Deed')
 ON CONFLICT (record_id) DO NOTHING;
 
 
@@ -53,7 +54,9 @@ INSERT INTO ownership_history (history_id, survey_number, owner_name, transfer_d
 ('HIST-019', '801/A', 'Bishwanath Prasad', '1988-06-20', 'Original Grant'),
 ('HIST-020', '801/A', 'Rameshwar Prasad', '2017-05-11', 'Inheritance Mutation'),
 ('HIST-021', '901/A', 'Harpreet Chawla', '2010-09-05', 'Sale Deed'),
-('HIST-022', '901/A', 'Tarun Chawla', '2022-11-30', 'Sale Deed')
+('HIST-022', '901/A', 'Tarun Chawla', '2022-11-30', 'Sale Deed'),
+('HIST-TEST-1042-1', 'SY-TEST-104/2', 'Ram Kumar', '2015-06-10', 'Original Grant'),
+('HIST-TEST-1042-2', 'SY-TEST-104/2', 'Arun Kumar', '2026-09-15', 'Sale Deed')
 ON CONFLICT (history_id) DO NOTHING;
 
 

@@ -156,12 +156,15 @@ class LandVerificationEngine:
             return {
                 "document_id": document_id,
                 "verification_status": "UNVERIFIED",
+                "verification_outcome": "INCONCLUSIVE",
                 "reference_status": "MISSING_KEY",
                 "matched_record_id": None,
                 "matched_land_record": None,
                 "field_matches": field_matches,
                 "detected_anomalies": data_quality_warnings,
+                "record_inconsistencies": [],
                 "data_quality_warnings": data_quality_warnings,
+                "reference_notices": [],
                 "anomalies_count": len(data_quality_warnings),
                 "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
             }
@@ -228,35 +231,39 @@ class LandVerificationEngine:
 
         # If survey is NOT in reference database -> REFERENCE_NOT_FOUND (NOT FRAUD!)
         if not matched_record:
-            data_quality_warnings.append({
-                "type": "REFERENCE_RECORD_NOT_AVAILABLE",
-                "category": "Reference Status",
-                "severity": "Low",
-                "title": "No Matching Reference Record in Demo Database",
-                "expected": f"Survey parcel '{survey_number}' indexed in synthetic reference database",
-                "found": f"No reference entry found for Survey '{survey_number}'",
-                "description": f"Survey number '{survey_number}' does not exist in the current synthetic test dataset. This indicates an unindexed parcel, not fraud or title invalidity."
-            })
-            anomalies.append({
-                "type": "SURVEY_NOT_FOUND",
-                "category": "Reference Status",
-                "severity": "Low",
-                "title": "Survey Parcel Not Found in Synthetic Registry",
-                "expected": f"Registered Land Record for Survey '{survey_number}'",
-                "found": f"No record matching Survey '{survey_number}'",
-                "description": f"Survey number '{survey_number}' does not match any registered land record in the synthetic database."
-            })
-            all_issues = anomalies + data_quality_warnings
+            ref_notices = [
+                {
+                    "type": "REFERENCE_RECORD_NOT_AVAILABLE",
+                    "category": "Reference Status",
+                    "severity": "Low",
+                    "title": "No Matching Reference Record in Demo Database",
+                    "expected": f"Survey parcel '{survey_number}' indexed in synthetic reference database",
+                    "found": f"No reference entry found for Survey '{survey_number}'",
+                    "description": f"Survey number '{survey_number}' does not exist in the current synthetic test dataset. This indicates an unindexed parcel, not fraud or title invalidity."
+                },
+                {
+                    "type": "SURVEY_NOT_FOUND",
+                    "category": "Reference Status",
+                    "severity": "Low",
+                    "title": "Survey Parcel Not Found in Synthetic Registry",
+                    "expected": f"Registered Land Record for Survey '{survey_number}'",
+                    "found": f"No record matching Survey '{survey_number}'",
+                    "description": f"Survey number '{survey_number}' does not match any registered land record in the synthetic database. Unindexed parcels in the prototype layer are treated as unverified, not fraudulent."
+                }
+            ]
+            all_issues = ref_notices + data_quality_warnings
             return {
                 "document_id": document_id,
                 "verification_status": "REFERENCE_NOT_FOUND",
+                "verification_outcome": "REFERENCE_NOT_FOUND",
                 "reference_status": "NO_MATCHING_REFERENCE",
                 "matched_record_id": None,
                 "matched_land_record": None,
                 "field_matches": field_matches,
                 "detected_anomalies": all_issues,
-                "record_inconsistencies": anomalies,
+                "record_inconsistencies": [],
                 "data_quality_warnings": data_quality_warnings,
+                "reference_notices": ref_notices,
                 "anomalies_count": len(all_issues),
                 "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
             }
@@ -423,6 +430,7 @@ class LandVerificationEngine:
             "detected_anomalies": all_issues,
             "record_inconsistencies": anomalies,
             "data_quality_warnings": data_quality_warnings,
+            "reference_notices": [],
             "anomalies_count": len(all_issues),
             "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
         }
@@ -450,6 +458,7 @@ class LandVerificationEngine:
         return {
             "document_id": document_id,
             "verification_status": "INCONCLUSIVE",
+            "verification_outcome": "INCONCLUSIVE",
             "reference_status": "DOCUMENT_NOT_FOUND",
             "matched_record_id": None,
             "matched_land_record": None,
@@ -479,6 +488,7 @@ class LandVerificationEngine:
                 "found": "Document ID not found",
                 "description": f"No document entry found for ID '{document_id}'."
             }],
+            "reference_notices": [],
             "anomalies_count": 1,
             "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
         }

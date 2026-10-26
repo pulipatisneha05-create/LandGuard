@@ -57,6 +57,9 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
 
   const docId = activeDocument?.document_id || riskData?.document_id || "DOC-UNASSIGNED";
 
+  const verStatus = riskData?.verification_status || verificationResult?.verification_status || (activeDocument ? "PENDING" : "UNVERIFIED");
+  const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND";
+
   // Derive breakdown from live risk data, shared verification result, or aligned fallback
   const breakdown = (riskData?.scoring_breakdown && riskData.scoring_breakdown.length > 0)
     ? riskData.scoring_breakdown
@@ -66,6 +69,7 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
         title: a.title || a.type,
         severity: a.severity || "High",
         points_added: ANOMALY_WEIGHTS[a.type] || (a.severity === "Critical" ? 30 : a.severity === "High" ? 25 : 15),
+        reason_for_points: a.reason_for_points || (ANOMALY_WEIGHTS[a.type] === 0 ? "Informational finding (0 pts)" : `Scored discrepancy (+${ANOMALY_WEIGHTS[a.type] || 15} pts)`),
         description: a.description || ""
       }))
     : activeDocument
@@ -118,6 +122,23 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
         </div>
       ) : (
         <>
+          {/* Informational banner distinguishing 0-point risk score from unverified reference status */}
+          {isReferenceNotFound && (
+            <div className="p-4 rounded-xl bg-blue-950/40 border border-blue-800 text-blue-200 text-xs flex items-start gap-3 shadow-md">
+              <span className="text-lg">ℹ️</span>
+              <div>
+                <strong className="block text-sm text-blue-300 font-bold mb-1">
+                  Verification Status: Reference Not Found / Unindexed (Risk Score: 0/100)
+                </strong>
+                <p className="text-slate-300 leading-relaxed">
+                  No fraud or forged attribute anomalies were identified in the document text, resulting in 0 risk penalty points.
+                  However, because this parcel is not indexed in the synthetic demonstration registry, it remains <strong>UNVERIFIED</strong>.
+                  A 0-point risk score does not imply official government verification.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Visual Risk Gauge & Status Banner */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
             <div className="md:col-span-5">
@@ -153,14 +174,21 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
                 </div>
               </div>
 
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-blue-400 block">Verification Recommendation:</span>
-                  <span className="text-sm font-bold text-white">{recommendation}</span>
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-1">
+                {riskData?.status_summary && (
+                  <div className="text-[11px] font-bold text-slate-400">
+                    Status: <span className="text-slate-200">{riskData.status_summary}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-blue-400 block">Verification Recommendation:</span>
+                    <span className="text-sm font-bold text-white">{recommendation}</span>
+                  </div>
+                  <span className="text-xs font-mono font-bold px-3 py-1 bg-slate-800 rounded border border-slate-700 text-slate-300">
+                    {score} / 100 Pts
+                  </span>
                 </div>
-                <span className="text-xs font-mono font-bold px-3 py-1 bg-slate-800 rounded border border-slate-700 text-slate-300">
-                  {score} / 100 Pts
-                </span>
               </div>
             </div>
           </div>
@@ -189,6 +217,11 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
                       {item.severity ? `${item.severity} Severity` : "Info"}
                     </span>
                   </div>
+                  {item.reason_for_points && (
+                    <div className="text-xs text-blue-300/90 font-medium">
+                      ↳ {item.reason_for_points}
+                    </div>
+                  )}
                   <p className="text-xs text-slate-400 leading-relaxed pt-1">
                     {item.description}
                   </p>
