@@ -9,20 +9,21 @@ router = APIRouter()
 
 
 @router.get("/parcels")
-def get_all_gis_parcels(db: Session = Depends(get_db)):
+def get_all_gis_parcels(document_id: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Returns GeoJSON FeatureCollection of all fictional land parcel polygon boundaries,
-    enriched with live database attributes (owner_name, acreage, location, risk_level).
+    enriched with live database attributes (owner_name, acreage, location, risk_level)
+    and optional active document assessment.
     """
-    return gis_spatial_engine.get_all_parcels_geojson(db)
+    return gis_spatial_engine.get_all_parcels_geojson(db, document_id=document_id)
 
 
 @router.get("/parcels/{survey_number:path}")
-def get_gis_parcel_by_survey(survey_number: str, db: Session = Depends(get_db)):
+def get_gis_parcel_by_survey(survey_number: str, document_id: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Returns specific GeoJSON polygon feature and spatial metadata for a survey_number.
     """
-    parcel_feature = gis_spatial_engine.get_parcel_by_survey(survey_number, db)
+    parcel_feature = gis_spatial_engine.get_parcel_by_survey(survey_number, db, document_id=document_id)
     if not parcel_feature:
         raise HTTPException(
             status_code=404,

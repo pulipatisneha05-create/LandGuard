@@ -41,8 +41,9 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
   const [riskData, setRiskData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  const docId = activeDocument?.document_id || verificationResult?.document_id || "DOC-2026-8901";
+
   useEffect(() => {
-    const docId = activeDocument?.document_id || "DOC-2026-8901";
     setIsLoading(true);
     getRiskAssessmentApi(docId)
       .then((data) => {
@@ -53,38 +54,46 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
         console.warn("Risk API notice:", err.message);
         setIsLoading(false);
       });
-  }, [activeDocument]);
-
-  const docId = activeDocument?.document_id || riskData?.document_id || "DOC-UNASSIGNED";
+  }, [docId]);
 
   const verStatus = riskData?.verification_status || verificationResult?.verification_status || (activeDocument ? "PENDING" : "UNVERIFIED");
-  const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND";
+  const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND" || riskData?.reference_status === "NO_MATCHING_REFERENCE" || verificationResult?.reference_status === "NO_MATCHING_REFERENCE";
 
   // Derive breakdown from live risk data, shared verification result, or aligned fallback
   const breakdown = (riskData?.scoring_breakdown && riskData.scoring_breakdown.length > 0)
     ? riskData.scoring_breakdown
+    : (verificationResult?.scoring_breakdown && verificationResult.scoring_breakdown.length > 0)
+    ? verificationResult.scoring_breakdown
     : (verificationResult?.detected_anomalies && verificationResult.detected_anomalies.length > 0)
-    ? verificationResult.detected_anomalies.map((a) => ({
-        anomaly_type: a.type || a.title || "ANOMALY",
-        title: a.title || a.type,
-        severity: a.severity || "High",
-        points_added: ANOMALY_WEIGHTS[a.type] || (a.severity === "Critical" ? 30 : a.severity === "High" ? 25 : 15),
-        reason_for_points: a.reason_for_points || (ANOMALY_WEIGHTS[a.type] === 0 ? "Informational finding (0 pts)" : `Scored discrepancy (+${ANOMALY_WEIGHTS[a.type] || 15} pts)`),
-        description: a.description || ""
-      }))
-    : activeDocument
-    ? []
-    : DEFAULT_FALLBACK_ANOMALIES;
+    ? verificationResult.detected_anomalies.map((a) => {
+        const type = a.type || a.issue_type || a.title || "ANOMALY";
+        const pts = a.points_added != null ? a.points_added : (ANOMALY_WEIGHTS[type] != null ? ANOMALY_WEIGHTS[type] : (a.severity === "Critical" ? 30 : a.severity === "High" ? 25 : 15));
+        return {
+          issue_type: type,
+          title: a.title || type,
+          severity: a.severity || "High",
+          points_added: pts,
+          reason_for_points: a.reason_for_points || (pts === 0 ? "Informational finding (0 pts)" : `Scored discrepancy (+${pts} pts)`),
+          description: a.description || "",
+          expected: a.expected || "",
+          found: a.found || ""
+        };
+      })
+    : (activeDocument?.document_id ? [] : DEFAULT_FALLBACK_ANOMALIES);
 
   // Calculate score dynamically from breakdown weights instead of a disconnected static number
   const computedPointsSum = breakdown.reduce((sum, item) => sum + (Number(item.points_added) || 0), 0);
-  const score = riskData?.risk_score != null ? riskData.risk_score : Math.min(computedPointsSum, 100);
+  const score = riskData?.risk_score != null
+    ? riskData.risk_score
+    : verificationResult?.risk_score != null
+    ? verificationResult.risk_score
+    : Math.min(computedPointsSum, 100);
 
   // Normalize risk level category for consistent UI threshold highlights
-  const rawLevel = riskData?.risk_level || (score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : 'LOW');
+  const rawLevel = riskData?.risk_level || verificationResult?.risk_level || (score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : 'LOW');
   const normalizedLevel = (rawLevel || '').toUpperCase().replace(' RISK', '').trim();
 
-  const recommendation = riskData?.recommendation || (
+  const recommendation = riskData?.recommendation || verificationResult?.recommendation || (
     normalizedLevel === 'LOW' ? "No major inconsistency detected" :
     normalizedLevel === 'MEDIUM' ? "Manual review recommended" :
     normalizedLevel === 'HIGH' ? "Further verification required" :
@@ -202,7 +211,7 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
                 <div key={idx} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{item.title || item.anomaly_type}</span>
+                      <span className="text-sm font-bold text-white">{item.title || item.issue_type || item.anomaly_type}</span>
                       {Number(item.points_added) > 0 ? (
                         <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800">
                           +{item.points_added} Points Added
@@ -220,6 +229,18 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
                   {item.reason_for_points && (
                     <div className="text-xs text-blue-300/90 font-medium">
                       ↳ {item.reason_for_points}
+                    </div>
+                  )}
+                  {item.expected && item.found && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
+                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Expected</span>
+                        {item.expected}
+                      </div>
+                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Found</span>
+                        {item.found}
+                      </div>
                     </div>
                   )}
                   <p className="text-xs text-slate-400 leading-relaxed pt-1">

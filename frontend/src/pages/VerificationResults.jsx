@@ -33,6 +33,8 @@ export default function VerificationResults({ activeDocument, verificationResult
   const docId = activeDocument?.document_id || verData?.document_id || "DOC-UNASSIGNED";
   const verStatus = verData?.verification_status || (activeDocument ? "PENDING" : "UNVERIFIED");
   const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND" || verData?.reference_status === "NO_MATCHING_REFERENCE";
+  const riskScore = verData?.risk_score != null ? verData.risk_score : (isReferenceNotFound ? 0 : null);
+  const riskLevel = verData?.risk_level || (riskScore != null ? (riskScore >= 80 ? "CRITICAL" : riskScore >= 60 ? "HIGH" : riskScore >= 30 ? "MEDIUM" : "LOW") : null);
 
   const docFields = activeDocument?.extracted_nlp_fields || activeDocument?.extracted_fields || {};
   const docRawArea = docFields.land_area_raw || (docFields.land_area_unit ? `${docFields.land_area_numeric} ${docFields.land_area_unit}` : (docFields.land_area_acres ? `${docFields.land_area_acres} Acres` : null));
@@ -59,9 +61,12 @@ export default function VerificationResults({ activeDocument, verificationResult
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-2xl font-extrabold text-white tracking-tight">Verification Results</h2>
             <StatusBadge status={verStatus} />
+            {riskScore != null && (
+              <RiskScoreBadge score={riskScore} size="sm" />
+            )}
           </div>
           <p className="text-sm text-slate-400 mt-1">
             Automated cross-matching of deed attributes against official Government Land Revenue Registry databases ({docId}).
@@ -111,7 +116,22 @@ export default function VerificationResults({ activeDocument, verificationResult
       ) : (
         <>
           {/* Key Attributes Summary Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
+              <span className="text-[11px] font-bold uppercase text-slate-500 block">Fraud Risk Index</span>
+              <span className="text-base font-bold text-white mt-1 block">
+                {riskScore != null ? `${riskScore} / 100` : (isReferenceNotFound ? "0 / 100" : "Assessing...")}
+              </span>
+              <span className={`text-xs font-semibold ${
+                riskLevel === 'CRITICAL' ? 'text-purple-400' :
+                riskLevel === 'HIGH' ? 'text-rose-400' :
+                riskLevel === 'MEDIUM' ? 'text-amber-400' :
+                'text-emerald-400'
+              }`}>
+                {riskLevel ? `${riskLevel} Risk` : (isReferenceNotFound ? "Unindexed (0 pts)" : "Normal")}
+              </span>
+            </div>
+
             <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
               <span className="text-[11px] font-bold uppercase text-slate-500 block">Owner Name Match</span>
               <span className="text-base font-bold text-white mt-1 block">

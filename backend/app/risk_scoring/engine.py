@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models import RiskAssessment, VerificationResult, DocumentRecord
@@ -48,8 +48,15 @@ class ExplainableRiskScoringEngine:
         Computes risk score and level for a given document_id, persists the result
         in risk_assessments table, and returns an explainable breakdown.
         """
-        # 1. Run or fetch verification results for document
         verification_payload = verification_engine.verify_document(document_id, db)
+        return self.score_verification_payload(verification_payload, db=db)
+
+    def score_verification_payload(self, verification_payload: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+        """
+        Pure rule-based scoring function that calculates explainable risk metrics
+        directly from a verification_payload, optionally persisting to risk_assessments table.
+        """
+        document_id = verification_payload.get("document_id", "DOC-UNASSIGNED")
         verification_id = verification_payload.get("verification_id", f"VER-{document_id}")
         detected_anomalies = verification_payload.get("detected_anomalies", [])
         ver_status = verification_payload.get("verification_status", "UNVERIFIED")
@@ -151,16 +158,17 @@ class ExplainableRiskScoringEngine:
             recommendations=f"{recommendation} | Summary: {summary_str}"
         )
 
-        try:
-            db.query(RiskAssessment).filter(RiskAssessment.verification_id == verification_id).delete()
-            db.add(risk_db)
-            db.commit()
-        except Exception as err:
+        if db:
             try:
-                db.rollback()
-            except Exception:
-                pass
-            print(f"Notice: Risk assessment DB persistence note: {err}")
+                db.query(RiskAssessment).filter(RiskAssessment.verification_id == verification_id).delete()
+                db.add(risk_db)
+                db.commit()
+            except Exception as err:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                print(f"Notice: Risk assessment DB persistence note: {err}")
 
         return {
             "assessment_id": assessment_id,

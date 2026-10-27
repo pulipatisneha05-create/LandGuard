@@ -68,7 +68,18 @@ export default function App() {
     };
 
     setActiveDocument(docPayload);
-    setVerificationResult(null);
+    if (record.riskScore != null) {
+      setVerificationResult({
+        document_id: docId,
+        verification_status: record.status ? record.status.toUpperCase() : "VERIFIED",
+        risk_score: record.riskScore,
+        risk_level: record.riskLevel || (record.riskScore >= 60 ? "HIGH" : record.riskScore >= 30 ? "MEDIUM" : "LOW"),
+        detected_anomalies: [],
+        scoring_breakdown: []
+      });
+    } else {
+      setVerificationResult(null);
+    }
     setActiveTab(targetTab);
   };
 
@@ -99,7 +110,12 @@ export default function App() {
       case 'history':
         return <OwnershipHistory activeDocument={activeDocument} />;
       case 'gis':
-        return <GisMap activeDocument={activeDocument} />;
+        return (
+          <GisMap
+            activeDocument={activeDocument}
+            verificationResult={verificationResult}
+          />
+        );
       default:
         return <Dashboard onNavigate={(tab) => setActiveTab(tab)} />;
     }

@@ -48,7 +48,7 @@ def init_db_tables():
 
         # Idempotently ensure synthetic reference records and SY-TEST-104/2 exist
         from app.database import SessionLocal
-        from app.models import LandRecord, OwnershipHistory
+        from app.models import LandRecord, OwnershipHistory, DocumentRecord
         import csv
         import os
         from datetime import datetime, date
@@ -131,6 +131,66 @@ def init_db_tables():
                                 transfer_type=row.get("transfer_type")
                             ))
                 db.commit()
+
+            # 4. Ensure Baseline Document Records exist for direct assessment and fallback testing
+            if not db.query(DocumentRecord).filter(DocumentRecord.document_id == "DOC-2026-8901").first():
+                db.add(DocumentRecord(
+                    document_id="DOC-2026-8901",
+                    filename="Sale_Deed_Plot_402B.pdf",
+                    file_path="sample_data/Sale_Deed_Plot_402B.pdf",
+                    file_type="PDF",
+                    file_size_bytes=28307,
+                    ocr_status="COMPLETED",
+                    extracted_text="GOVERNMENT OF TELANGANA\nREGISTRATION AND STAMPS DEPARTMENT\n\nSALE DEED\nDOCUMENT NUMBER: DOC-2026-8901\nEXECUTANT (SELLER): Rajesh Kumar Sharma\nCLAIMED SURVEY NO: 402/B\nCLAIMED EXTENT: 2.45 Acres\nLOCATION: Village Gachibowli, Mandal Serilingampally, District Ranga Reddy, Telangana",
+                    extracted_owner_name="Rajesh Kumar Sharma",
+                    extracted_survey_number="402/B",
+                    extracted_land_area=2.45,
+                    extracted_land_area_raw="2.45 Acres",
+                    extracted_land_area_unit="Acres",
+                    extracted_land_area_normalized_acres=2.45,
+                    extracted_location="Gachibowli, Serilingampally, Ranga Reddy, Telangana",
+                    ocr_confidence_score=96.5
+                ))
+
+            if not db.query(DocumentRecord).filter(DocumentRecord.document_id == "DOC-TEST-FILE-SUSPICIOUS-001").first():
+                db.add(DocumentRecord(
+                    document_id="DOC-TEST-FILE-SUSPICIOUS-001",
+                    filename="LandGuard_Synthetic_Suspicious_Test_Record.pdf",
+                    file_path="test_documents/LandGuard_Synthetic_Suspicious_Test_Record.pdf",
+                    file_type="PDF",
+                    file_size_bytes=4495,
+                    ocr_status="COMPLETED",
+                    extracted_text="GOVERNMENT OF TELANGANA\nREGISTRATION AND STAMPS DEPARTMENT\n\nSALE DEED\nDOCUMENT NUMBER: DOC-TEST-FILE-SUSPICIOUS-001\nEXECUTANT (SELLER): Fictional Test Owner\nCLAIMED SURVEY NO: 101/A\nCLAIMED EXTENT: 12.50 acres\nLOCATION: Village Greenvalley, Mandal Serilingampally, District Ranga Reddy, Telangana",
+                    extracted_owner_name="kamal",
+                    extracted_survey_number="101/A",
+                    extracted_land_area=12.50,
+                    extracted_land_area_raw="12.50 acres",
+                    extracted_land_area_unit="acres",
+                    extracted_land_area_normalized_acres=12.50,
+                    extracted_location="Greenvalley, Serilingampally, Ranga Reddy, Telangana",
+                    ocr_confidence_score=98.0
+                ))
+
+            if not db.query(DocumentRecord).filter(DocumentRecord.document_id == "DOC-TEST-FILE-UNINDEXED-001").first():
+                db.add(DocumentRecord(
+                    document_id="DOC-TEST-FILE-UNINDEXED-001",
+                    filename="LandGuard_Synthetic_Test_Unindexed_Record.pdf",
+                    file_path="test_documents/LandGuard_Synthetic_Test_Unindexed_Record.pdf",
+                    file_type="PDF",
+                    file_size_bytes=4182,
+                    ocr_status="COMPLETED",
+                    extracted_text="GOVERNMENT OF TELANGANA\nREGISTRATION AND STAMPS DEPARTMENT\n\nSALE DEED\nDOCUMENT NUMBER: DOC-TEST-FILE-UNINDEXED-001\nEXECUTANT (SELLER): Praveen Reddy\nCLAIMED SURVEY NO: SY-UNINDEXED-999\nCLAIMED EXTENT: 1.50 acres\nLOCATION: Demo Village, Demo District, Telangana",
+                    extracted_owner_name="Praveen Reddy",
+                    extracted_survey_number="SY-UNINDEXED-999",
+                    extracted_land_area=1.50,
+                    extracted_land_area_raw="1.50 acres",
+                    extracted_land_area_unit="acres",
+                    extracted_land_area_normalized_acres=1.50,
+                    extracted_location="Demo Village, Demo District, Telangana",
+                    ocr_confidence_score=98.0
+                ))
+
+            db.commit()
         except Exception as seed_err:
             logger.warning(f"Notice: Seeding reference records check: {seed_err}")
             try:

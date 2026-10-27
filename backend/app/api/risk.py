@@ -13,7 +13,7 @@ logger = logging.getLogger("landguard.risk")
 router = APIRouter()
 
 
-@router.post("/assess/{document_id}", status_code=status.HTTP_200_OK)
+@router.api_route("/assess/{document_id}", methods=["GET", "POST"], status_code=status.HTTP_200_OK)
 def assess_document_risk(document_id: str, db: Session = Depends(get_db)):
     """
     Run explainable risk scoring assessment for a document_id.
@@ -42,7 +42,7 @@ def assess_document_risk(document_id: str, db: Session = Depends(get_db)):
     return risk_payload
 
 
-@router.get("/assessment/{document_id}")
+@router.api_route("/assessment/{document_id}", methods=["GET", "POST"], status_code=status.HTTP_200_OK)
 def get_risk_assessment_result(document_id: str, db: Session = Depends(get_db)):
     """
     Fetch computed risk assessment breakdown and recommendations for a document_id.

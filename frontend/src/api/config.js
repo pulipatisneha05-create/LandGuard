@@ -32,27 +32,48 @@ export async function getDocumentNlpApi(documentId) {
 }
 
 export async function getVerificationApi(documentId) {
-  const response = await fetch(`${API_BASE_URL}/verification/verify/${documentId}`, {
-    method: "POST"
-  });
-  if (!response.ok) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/verification/verify/${documentId}`, {
+      method: "POST"
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (postErr) {
+    console.warn("POST verification notice, attempting GET results fallback:", postErr.message);
+  }
+
+  const getResp = await fetch(`${API_BASE_URL}/verification/results/${documentId}`);
+  if (!getResp.ok) {
     throw new Error("Failed to fetch verification results.");
   }
-  return response.json();
+  return getResp.json();
 }
 
 export async function getRiskAssessmentApi(documentId) {
-  const response = await fetch(`${API_BASE_URL}/risk/assess/${documentId}`, {
-    method: "POST"
-  });
-  if (!response.ok) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/risk/assess/${documentId}`, {
+      method: "POST"
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (postErr) {
+    console.warn("POST risk assess notice, attempting GET assessment fallback:", postErr.message);
+  }
+
+  const getResp = await fetch(`${API_BASE_URL}/risk/assessment/${documentId}`);
+  if (!getResp.ok) {
     throw new Error("Failed to fetch risk assessment.");
   }
-  return response.json();
+  return getResp.json();
 }
 
-export async function getGisParcelsApi() {
-  const response = await fetch(`${API_BASE_URL}/gis/parcels`);
+export async function getGisParcelsApi(documentId = null) {
+  const url = documentId
+    ? `${API_BASE_URL}/gis/parcels?document_id=${encodeURIComponent(documentId)}`
+    : `${API_BASE_URL}/gis/parcels`;
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error("Failed to fetch GIS parcel boundaries.");
   }

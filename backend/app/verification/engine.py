@@ -106,6 +106,21 @@ class LandVerificationEngine:
             print(f"Notice: Verification result DB persistence note: {err}")
 
         verification_payload["verification_id"] = ver_id
+
+        # 4. Compute and Attach Explainable Risk Assessment
+        try:
+            from app.risk_scoring.engine import risk_scoring_engine
+            risk_info = risk_scoring_engine.score_verification_payload(verification_payload, db=db)
+            verification_payload["risk_score"] = risk_info.get("risk_score", 0)
+            verification_payload["risk_level"] = risk_info.get("risk_level", "LOW")
+            verification_payload["recommendation"] = risk_info.get("recommendation", "")
+            verification_payload["status_summary"] = risk_info.get("status_summary", "")
+            verification_payload["inconsistency_score"] = risk_info.get("inconsistency_score", 0)
+            verification_payload["quality_score"] = risk_info.get("quality_score", 0)
+            verification_payload["scoring_breakdown"] = risk_info.get("scoring_breakdown", [])
+        except Exception as r_err:
+            print(f"Notice: Risk scoring evaluation note during verification: {r_err}")
+
         return verification_payload
 
     def verify_extracted_attributes(
@@ -490,6 +505,13 @@ class LandVerificationEngine:
             }],
             "reference_notices": [],
             "anomalies_count": 1,
+            "risk_score": 0,
+            "risk_level": "LOW",
+            "recommendation": "Document record not found in system storage.",
+            "status_summary": "Unverified / Document Not Found (Risk Score: 0/100)",
+            "inconsistency_score": 0,
+            "quality_score": 0,
+            "scoring_breakdown": [],
             "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
         }
 
