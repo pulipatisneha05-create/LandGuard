@@ -11,6 +11,7 @@ import GisMap from './pages/GisMap';
 import Login from './pages/Login';
 import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import { evaluateDocumentRisk } from './utils/verificationEvaluator';
 
 function parseCurrentRoute() {
   if (typeof window === 'undefined') {
@@ -83,8 +84,22 @@ export default function App() {
   const [isLoginRoute, setIsLoginRoute] = useState(initialRouteInfo.route === 'login');
   const [activeRole, setActiveRole] = useState(initialRouteInfo.role); // null | 'user' | 'admin'
   const [activeTab, setActiveTab] = useState(initialRouteInfo.tab || (initialRouteInfo.route === 'login' ? 'login' : 'dashboard'));
-  const [activeDocument, setActiveDocument] = useState(null);
-  const [verificationResult, setVerificationResult] = useState(null);
+  const [activeDocument, setActiveDocument] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('landguard_active_doc');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [verificationResult, setVerificationResult] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('landguard_verification');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
 
   useEffect(() => {
     // If an unauthenticated visitor enters on root '/' or empty, synchronize address bar to /login
@@ -228,15 +243,47 @@ export default function App() {
   const handleLogout = () => {
     try {
       sessionStorage.removeItem('landguard_role');
+      sessionStorage.removeItem('landguard_active_doc');
+      sessionStorage.removeItem('landguard_verification');
     } catch (e) {}
     setActiveRole(null);
+    setActiveDocument(null);
+    setVerificationResult(null);
     handleNavigate('login', null);
   };
 
   const handleUploadSuccess = (uploadedDocPayload) => {
     setActiveDocument(uploadedDocPayload);
-    setVerificationResult(null);
+    try {
+      sessionStorage.setItem('landguard_active_doc', JSON.stringify(uploadedDocPayload));
+    } catch (e) {}
+
+    // Evaluate risk immediately so verificationResult is pre-warmed for the workflow
+    const verResult =
+      uploadedDocPayload?.verification_result ||
+      evaluateDocumentRisk(uploadedDocPayload);
+
+    setVerificationResult(verResult);
+    try {
+      if (verResult) {
+        sessionStorage.setItem('landguard_verification', JSON.stringify(verResult));
+      } else {
+        sessionStorage.removeItem('landguard_verification');
+      }
+    } catch (e) {}
+
     handleNavigate('analysis');
+  };
+
+  const handleVerificationComplete = (verResult) => {
+    setVerificationResult(verResult);
+    try {
+      if (verResult) {
+        sessionStorage.setItem('landguard_verification', JSON.stringify(verResult));
+      } else {
+        sessionStorage.removeItem('landguard_verification');
+      }
+    } catch (e) {}
   };
 
   const handleSelectRecord = (record, targetTab = 'analysis') => {
@@ -287,8 +334,11 @@ export default function App() {
     };
 
     setActiveDocument(docPayload);
+    try {
+      sessionStorage.setItem('landguard_active_doc', JSON.stringify(docPayload));
+    } catch (e) {}
     if (record.riskScore != null) {
-      setVerificationResult({
+      const verObj = {
         document_id: docId,
         verification_status: record.status ? record.status.toUpperCase() : "VERIFIED",
         risk_score: record.riskScore,
@@ -305,9 +355,21 @@ export default function App() {
             ]
           : [],
         scoring_breakdown: []
-      });
+      };
+      setVerificationResult(verObj);
+      try {
+        sessionStorage.setItem('landguard_verification', JSON.stringify(verObj));
+      } catch (e) {}
     } else {
-      setVerificationResult(null);
+      const evaluated = evaluateDocumentRisk(docPayload);
+      setVerificationResult(evaluated);
+      try {
+        if (evaluated) {
+          sessionStorage.setItem('landguard_verification', JSON.stringify(evaluated));
+        } else {
+          sessionStorage.removeItem('landguard_verification');
+        }
+      } catch (e) {}
     }
     handleNavigate(targetTab);
   };
@@ -323,7 +385,7 @@ export default function App() {
           <VerificationResults
             activeDocument={activeDocument}
             verificationResult={verificationResult}
-            onVerificationComplete={setVerificationResult}
+            onVerificationComplete={handleVerificationComplete}
             onNavigate={handleNavigate}
           />
         );
@@ -332,15 +394,24 @@ export default function App() {
           <RiskScoreView
             activeDocument={activeDocument}
             verificationResult={verificationResult}
+            onNavigate={handleNavigate}
+            onProceedToHistory={() => handleNavigate('history')}
           />
         );
       case 'history':
-        return <OwnershipHistory activeDocument={activeDocument} />;
+        return (
+          <OwnershipHistory
+            activeDocument={activeDocument}
+            onNavigate={handleNavigate}
+            onProceedToGis={() => handleNavigate('gis')}
+          />
+        );
       case 'gis':
         return (
           <GisMap
             activeDocument={activeDocument}
             verificationResult={verificationResult}
+            onNavigate={handleNavigate}
           />
         );
       case 'user-dashboard':

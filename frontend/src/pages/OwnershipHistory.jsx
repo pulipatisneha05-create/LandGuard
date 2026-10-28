@@ -3,14 +3,64 @@ import StatusBadge from '../components/StatusBadge';
 import { getOwnershipHistoryApi } from '../api/config';
 import { mockOwnershipTimeline } from '../data/mockData';
 
-export default function OwnershipHistory({ activeDocument }) {
+// Safely parse diverse date strings into numeric timestamps for accurate chronological comparison
+function parseDateToTimestamp(dateStr, fallbackYear) {
+  if (!dateStr || typeof dateStr !== 'string') {
+    if (fallbackYear && !isNaN(Number(fallbackYear))) {
+      return new Date(Number(fallbackYear), 0, 1).getTime();
+    }
+    return -Infinity;
+  }
+
+  const trimmed = dateStr.trim();
+  if (!trimmed || trimmed.toUpperCase() === 'N/A' || trimmed.toUpperCase() === 'UNKNOWN') {
+    if (fallbackYear && !isNaN(Number(fallbackYear))) {
+      return new Date(Number(fallbackYear), 0, 1).getTime();
+    }
+    return -Infinity;
+  }
+
+  // 1. Try standard ISO or RFC date parsing
+  let timestamp = Date.parse(trimmed);
+  if (!isNaN(timestamp)) {
+    return timestamp;
+  }
+
+  // 2. Try hyphen-separated month-name dates like "12-Nov-1985"
+  const cleaned = trimmed.replace(/-/g, ' ');
+  timestamp = Date.parse(cleaned);
+  if (!isNaN(timestamp)) {
+    return timestamp;
+  }
+
+  // 3. Extract 4-digit year as chronological fallback
+  const yearMatch = trimmed.match(/\b(19\d\d|20\d\d)\b/);
+  if (yearMatch) {
+    return new Date(Number(yearMatch[1]), 0, 1).getTime();
+  }
+
+  if (fallbackYear && !isNaN(Number(fallbackYear))) {
+    return new Date(Number(fallbackYear), 0, 1).getTime();
+  }
+
+  return -Infinity;
+}
+
+export default function OwnershipHistory({ activeDocument, onNavigate, onProceedToGis }) {
   const [historyData, setHistoryData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  const handleGoToGis = onProceedToGis || (() => onNavigate && onNavigate('gis'));
+
   useEffect(() => {
-    const docId = activeDocument?.document_id || "DOC-2026-8901";
+    const surveyOrDocId =
+      activeDocument?.extracted_nlp_fields?.survey_number ||
+      activeDocument?.extracted_fields?.survey_number ||
+      activeDocument?.survey_number ||
+      activeDocument?.document_id ||
+      "DOC-2026-8901";
     setIsLoading(true);
-    getOwnershipHistoryApi(docId)
+    getOwnershipHistoryApi(surveyOrDocId)
       .then((data) => {
         setHistoryData(data);
         setIsLoading(false);
@@ -21,37 +71,69 @@ export default function OwnershipHistory({ activeDocument }) {
       });
   }, [activeDocument]);
 
-  const surveyNo = historyData?.survey_number || activeDocument?.extracted_nlp_fields?.survey_number || "Unspecified";
+  const surveyNo =
+    historyData?.survey_number ||
+    activeDocument?.extracted_nlp_fields?.survey_number ||
+    activeDocument?.extracted_fields?.survey_number ||
+    activeDocument?.survey_number ||
+    "Unspecified";
 
   const hasLoadedHistory = historyData && Array.isArray(historyData.history_timeline);
-  const timelineItems = hasLoadedHistory
-    ? historyData.history_timeline.map((h, idx) => ({
-        year: h.transfer_date ? h.transfer_date.split('-')[0] : "2023",
-        date: h.transfer_date || "2023-04-10",
-        event: h.transfer_type || "Sale Deed",
-        parties: `Registered Owner: ${h.owner_name}`,
-        surveyNo: h.survey_number,
-        area: "Registered Parcel",
-        documentRef: h.history_id,
-        status: h.transfer_type.includes("Duplicate") || h.transfer_type.includes("Rapid") ? "Flagged Suspicious" : "Verified"
-      }))
+  const rawItems = hasLoadedHistory
+    ? historyData.history_timeline.map((h, idx) => {
+        const yearVal = h.transfer_date && h.transfer_date !== "N/A"
+          ? (h.transfer_date.match(/\b(19\d\d|20\d\d)\b/) ? h.transfer_date.match(/\b(19\d\d|20\d\d)\b/)[0] : h.transfer_date.split('-')[0])
+          : "N/A";
+        return {
+          year: yearVal,
+          date: h.transfer_date || "N/A",
+          event: h.transfer_type || "Sale Deed",
+          parties: `Registered Owner: ${h.owner_name || "Unspecified"}`,
+          surveyNo: h.survey_number || surveyNo,
+          area: "Registered Parcel",
+          documentRef: h.history_id || `TR-${idx + 1}`,
+          status: h.transfer_type && (h.transfer_type.includes("Duplicate") || h.transfer_type.includes("Rapid")) ? "Flagged Suspicious" : "Verified"
+        };
+      })
     : activeDocument
     ? []
     : mockOwnershipTimeline;
 
+  // Sort descending: newest transaction date first, oldest last
+  const timelineItems = [...rawItems].sort((a, b) => {
+    const timeA = parseDateToTimestamp(a.date, a.year);
+    const timeB = parseDateToTimestamp(b.date, b.year);
+    if (timeA !== timeB) {
+      return timeB - timeA;
+    }
+    return 0;
+  });
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">Ownership History Chain</h2>
-          <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800">
-            Survey No. {surveyNo}
-          </span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-2xl font-extrabold text-white tracking-tight">Ownership History Chain</h2>
+            <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800">
+              Survey No. {surveyNo}
+            </span>
+          </div>
+          <p className="text-sm text-slate-400 mt-1">
+            Historical title chain timeline tracking land transfers, mutations, encumbrances, and grants from PostgreSQL ownership_history.
+          </p>
         </div>
-        <p className="text-sm text-slate-400 mt-1">
-          Historical title chain timeline tracking land transfers, mutations, encumbrances, and grants from PostgreSQL ownership_history.
-        </p>
+
+        <button
+          onClick={handleGoToGis}
+          className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs md:text-sm rounded-xl transition-all shadow-md shadow-emerald-950 cursor-pointer shrink-0"
+        >
+          <span>View GIS Map Parcel</span>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+          </svg>
+        </button>
       </div>
 
       {isLoading ? (

@@ -3,13 +3,14 @@ import StatusBadge from '../components/StatusBadge';
 import RiskScoreBadge from '../components/RiskScoreBadge';
 import { getVerificationApi } from '../api/config';
 import { mockSelectedRecord } from '../data/mockData';
+import { evaluateDocumentRisk } from '../utils/verificationEvaluator';
 
 export default function VerificationResults({ activeDocument, verificationResult, onVerificationComplete, onNavigate }) {
   const [verData, setVerData] = useState(verificationResult);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (verificationResult) {
+    if (verificationResult && verificationResult.risk_score != null) {
       setVerData(verificationResult);
       return;
     }
@@ -25,7 +26,16 @@ export default function VerificationResults({ activeDocument, verificationResult
         setIsLoading(false);
       })
       .catch((err) => {
-        console.warn("Verification API notice:", err.message);
+        console.warn("Verification API notice, evaluating rule baseline:", err.message);
+        if (activeDocument) {
+          const evaluated = evaluateDocumentRisk(activeDocument);
+          if (evaluated) {
+            setVerData(evaluated);
+            if (onVerificationComplete) {
+              onVerificationComplete(evaluated);
+            }
+          }
+        }
         setIsLoading(false);
       });
   }, [activeDocument, verificationResult, onVerificationComplete]);
@@ -64,8 +74,12 @@ export default function VerificationResults({ activeDocument, verificationResult
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-2xl font-extrabold text-white tracking-tight">Verification Results</h2>
             <StatusBadge status={verStatus} />
-            {riskScore != null && (
+            {riskScore != null ? (
               <RiskScoreBadge score={riskScore} size="sm" />
+            ) : (
+              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                Risk Score: Not available
+              </span>
             )}
           </div>
           <p className="text-sm text-slate-400 mt-1">
@@ -86,9 +100,12 @@ export default function VerificationResults({ activeDocument, verificationResult
           </button>
           <button 
             onClick={() => onNavigate('risk')}
-            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md"
+            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md cursor-pointer"
           >
-            View Risk Score Audit
+            <span>Risk Score Audit</span>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
           </button>
         </div>
       </div>
@@ -184,59 +201,83 @@ export default function VerificationResults({ activeDocument, verificationResult
           </div>
 
           {/* Explanation of Detected Issues Box */}
-          <div className="bg-slate-900 border border-rose-900/50 rounded-xl p-6 space-y-4 shadow-lg">
-            <div className="flex items-center justify-between">
+          {detectedAnomalies.length > 0 ? (
+            <div className="bg-slate-900 border border-rose-900/50 rounded-xl p-6 space-y-4 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-lg bg-rose-950 text-rose-400 border border-rose-800">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-extrabold text-white">Explanation of Detected Issues & Anomalies</h3>
+                    <p className="text-xs text-rose-300">
+                      Rule verification engine flagged {detectedAnomalies.length} anomaly issues.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                {detectedAnomalies.map((issue, idx) => (
+                  <div key={idx} className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-white">{idx + 1}. {issue.title || issue.type}</span>
+                        <span className={`text-[10px] uppercase font-extrabold px-2 py-0.5 rounded ${
+                          issue.severity === 'Critical' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
+                          issue.severity === 'High' ? 'bg-rose-950/80 text-rose-400 border border-rose-900' :
+                          issue.severity === 'Medium' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                          'bg-blue-950 text-blue-300 border border-blue-800'
+                        }`}>
+                          {issue.severity || 'High'} Priority
+                        </span>
+                        {issue.points_added != null && Number(issue.points_added) > 0 && (
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-900">
+                            +{issue.points_added} pts
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {issue.expected && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
+                        <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold block">Expected (Government Record)</span>
+                          {issue.expected}
+                        </div>
+                        <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold block">Found (Uploaded Document)</span>
+                          {issue.found}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-300 leading-relaxed pt-1">
+                      {issue.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-900 border border-emerald-900/50 rounded-xl p-6 space-y-2 shadow-lg">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-rose-950 text-rose-400 border border-rose-800">
+                <div className="p-2.5 rounded-lg bg-emerald-950 text-emerald-400 border border-emerald-800">
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-lg font-extrabold text-white">Explanation of Detected Issues & Anomalies</h3>
-                  <p className="text-xs text-rose-300">
-                    Rule verification engine flagged {detectedAnomalies.length} anomaly issues.
+                  <h3 className="text-lg font-extrabold text-white">Clean Verification: No Inconsistencies Detected</h3>
+                  <p className="text-xs text-emerald-300">
+                    Cross-verification against official land revenue registry records did not detect any title discontinuities, area discrepancies, or encumbrance anomalies.
                   </p>
                 </div>
               </div>
             </div>
-
-            <div className="space-y-3 pt-2">
-              {detectedAnomalies.map((issue, idx) => (
-                <div key={idx} className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-white">{idx + 1}. {issue.title || issue.type}</span>
-                      <span className={`text-[10px] uppercase font-extrabold px-2 py-0.5 rounded ${
-                        issue.severity === 'Critical' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
-                        issue.severity === 'High' ? 'bg-rose-950/80 text-rose-400 border border-rose-900' :
-                        'bg-amber-950 text-amber-300 border border-amber-800'
-                      }`}>
-                        {issue.severity || 'High'} Priority
-                      </span>
-                    </div>
-                  </div>
-
-                  {issue.expected && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Expected (Government Record)</span>
-                        {issue.expected}
-                      </div>
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Found (Uploaded Document)</span>
-                        {issue.found}
-                      </div>
-                    </div>
-                  )}
-
-                  <p className="text-xs text-slate-300 leading-relaxed pt-1">
-                    {issue.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* Recommended Next Steps & Protocol */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">

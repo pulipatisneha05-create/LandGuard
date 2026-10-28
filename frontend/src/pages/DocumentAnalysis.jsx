@@ -24,7 +24,7 @@ export default function DocumentAnalysis({ activeDocument, onProceedToResults })
   const ocrText = activeDocument?.extracted_text || nlpData?.extracted_text || "[No OCR text available. Please upload a document to run extraction.]";
   const ocrConfidence = activeDocument?.ocr_confidence_score ?? 0.0;
 
-  const fields = nlpData?.extracted_attributes || activeDocument?.extracted_nlp_fields || {};
+  const fields = nlpData?.extracted_attributes || activeDocument?.extracted_nlp_fields || activeDocument?.extracted_fields || {};
   const nlpConfidence = nlpData?.nlp_confidence_score ?? activeDocument?.nlp_confidence_score ?? (fields.owner_name ? 85.0 : 0.0);
   const locationText = nlpData?.location_summary || activeDocument?.location_summary || ([fields.village, fields.mandal, fields.district, fields.state].filter(Boolean).join(", ") || "Not detected in document");
 

@@ -19,8 +19,8 @@ import {
 
 export default function Login({ onLoginSuccess, onNavigateHome }) {
   const [role, setRole] = useState('user'); // 'user' | 'admin'
-  const [email, setEmail] = useState('landholder@landguard.gov');
-  const [password, setPassword] = useState('demo1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,17 +31,18 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
   const handleRoleChange = (newRole) => {
     setRole(newRole);
     setErrorMessage('');
-    if (newRole === 'admin') {
+  };
+
+  const handleQuickFill = (targetRole) => {
+    setRole(targetRole);
+    setErrorMessage('');
+    if (targetRole === 'admin') {
       setEmail('admin.auditor@landguard.gov');
       setPassword('admin2026');
     } else {
       setEmail('landholder@landguard.gov');
       setPassword('demo1234');
     }
-  };
-
-  const handleQuickFill = (targetRole) => {
-    handleRoleChange(targetRole);
     setNotification(`Filled ${targetRole === 'admin' ? 'Administrator' : 'Citizen'} demo credentials`);
     setTimeout(() => setNotification(null), 3000);
   };
@@ -528,7 +529,7 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={role === 'admin' ? 'admin.auditor@landguard.gov' : 'citizen@landguard.gov'}
+                  placeholder="Enter your email address"
                   required
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 transition-all"
                 />
@@ -557,7 +558,7 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="Enter your password"
                   required
                   className="w-full pl-10 pr-11 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 transition-all font-mono"
                 />

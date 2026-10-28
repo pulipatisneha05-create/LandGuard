@@ -2,23 +2,7 @@ import React, { useEffect, useState } from 'react';
 import RiskScoreBadge from '../components/RiskScoreBadge';
 import { getRiskAssessmentApi } from '../api/config';
 import { mockRiskBreakdown } from '../data/mockData';
-
-const ANOMALY_WEIGHTS = {
-  OWNER_NAME_MISMATCH: 25,
-  SURVEY_NUMBER_MISMATCH: 20,
-  SURVEY_NOT_FOUND: 0,
-  REFERENCE_RECORD_NOT_AVAILABLE: 0,
-  LAND_AREA_MISMATCH: 20,
-  DUPLICATE_REGISTRATION_FLAGGED: 30,
-  RAPID_OWNERSHIP_TRANSFER: 15,
-  UNFOUND_SELLER_IN_HISTORY: 15,
-  MISSING_HISTORICAL_TITLE_CHAIN: 15,
-  INCOMPLETE_DOCUMENT_DATA: 10,
-  LOW_OCR_CONFIDENCE: 5,
-  SPATIAL_LOCATION_MISMATCH: 20,
-  GIS_PARCEL_NOT_FOUND: 0,
-  DOCUMENT_NOT_FOUND: 0
-};
+import { evaluateDocumentRisk, ANOMALY_WEIGHTS } from '../utils/verificationEvaluator';
 
 const DEFAULT_FALLBACK_ANOMALIES = [
   {
@@ -37,10 +21,11 @@ const DEFAULT_FALLBACK_ANOMALIES = [
   }
 ];
 
-export default function RiskScoreView({ activeDocument, verificationResult }) {
+export default function RiskScoreView({ activeDocument, verificationResult, onNavigate, onProceedToHistory }) {
   const [riskData, setRiskData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  const handleGoToHistory = onProceedToHistory || (() => onNavigate && onNavigate('history'));
   const docId = activeDocument?.document_id || verificationResult?.document_id || "DOC-2026-8901";
 
   useEffect(() => {
@@ -51,54 +36,75 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
         setIsLoading(false);
       })
       .catch((err) => {
-        console.warn("Risk API notice:", err.message);
+        console.warn("Risk API notice, using local evaluation:", err.message);
+        if (!verificationResult && activeDocument) {
+          const evaluated = evaluateDocumentRisk(activeDocument);
+          if (evaluated) {
+            setRiskData(evaluated);
+          }
+        }
         setIsLoading(false);
       });
-  }, [docId]);
+  }, [docId, activeDocument, verificationResult]);
 
-  const verStatus = riskData?.verification_status || verificationResult?.verification_status || (activeDocument ? "PENDING" : "UNVERIFIED");
-  const isReferenceNotFound = verStatus === "REFERENCE_NOT_FOUND" || riskData?.reference_status === "NO_MATCHING_REFERENCE" || verificationResult?.reference_status === "NO_MATCHING_REFERENCE";
+  const effectiveResult =
+    riskData ||
+    verificationResult ||
+    (activeDocument ? evaluateDocumentRisk(activeDocument) : null);
 
-  // Derive breakdown from live risk data, shared verification result, or aligned fallback
-  const breakdown = (riskData?.scoring_breakdown && riskData.scoring_breakdown.length > 0)
-    ? riskData.scoring_breakdown
-    : (verificationResult?.scoring_breakdown && verificationResult.scoring_breakdown.length > 0)
-    ? verificationResult.scoring_breakdown
-    : (verificationResult?.detected_anomalies && verificationResult.detected_anomalies.length > 0)
-    ? verificationResult.detected_anomalies.map((a) => {
-        const type = a.type || a.issue_type || a.title || "ANOMALY";
-        const pts = a.points_added != null ? a.points_added : (ANOMALY_WEIGHTS[type] != null ? ANOMALY_WEIGHTS[type] : (a.severity === "Critical" ? 30 : a.severity === "High" ? 25 : 15));
-        return {
-          issue_type: type,
-          title: a.title || type,
-          severity: a.severity || "High",
-          points_added: pts,
-          reason_for_points: a.reason_for_points || (pts === 0 ? "Informational finding (0 pts)" : `Scored discrepancy (+${pts} pts)`),
-          description: a.description || "",
-          expected: a.expected || "",
-          found: a.found || ""
-        };
-      })
-    : (activeDocument?.document_id ? [] : DEFAULT_FALLBACK_ANOMALIES);
+  const verStatus =
+    effectiveResult?.verification_status ||
+    (activeDocument ? "PENDING" : "UNVERIFIED");
 
-  // Calculate score dynamically from breakdown weights instead of a disconnected static number
-  const computedPointsSum = breakdown.reduce((sum, item) => sum + (Number(item.points_added) || 0), 0);
-  const score = riskData?.risk_score != null
-    ? riskData.risk_score
-    : verificationResult?.risk_score != null
-    ? verificationResult.risk_score
-    : Math.min(computedPointsSum, 100);
+  const isReferenceNotFound =
+    verStatus === "REFERENCE_NOT_FOUND" ||
+    effectiveResult?.reference_status === "NO_MATCHING_REFERENCE";
+
+  // Derive breakdown from live risk data, shared verification result, or evaluated result
+  const breakdown =
+    effectiveResult?.scoring_breakdown && effectiveResult.scoring_breakdown.length > 0
+      ? effectiveResult.scoring_breakdown
+      : effectiveResult?.detected_anomalies && effectiveResult.detected_anomalies.length > 0
+      ? effectiveResult.detected_anomalies
+      : [];
+
+  const score =
+    effectiveResult?.risk_score != null
+      ? effectiveResult.risk_score
+      : breakdown.length > 0
+      ? Math.min(
+          breakdown.reduce((sum, item) => sum + (Number(item.points_added) || 0), 0),
+          100
+        )
+      : null;
 
   // Normalize risk level category for consistent UI threshold highlights
-  const rawLevel = riskData?.risk_level || verificationResult?.risk_level || (score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : 'LOW');
-  const normalizedLevel = (rawLevel || '').toUpperCase().replace(' RISK', '').trim();
+  const rawLevel =
+    effectiveResult?.risk_level ||
+    (score != null
+      ? score >= 80
+        ? 'CRITICAL'
+        : score >= 60
+        ? 'HIGH'
+        : score >= 30
+        ? 'MEDIUM'
+        : 'LOW'
+      : null);
+  const normalizedLevel = rawLevel
+    ? (rawLevel || '').toUpperCase().replace(' RISK', '').trim()
+    : 'NOT AVAILABLE';
 
-  const recommendation = riskData?.recommendation || verificationResult?.recommendation || (
-    normalizedLevel === 'LOW' ? "No major inconsistency detected" :
-    normalizedLevel === 'MEDIUM' ? "Manual review recommended" :
-    normalizedLevel === 'HIGH' ? "Further verification required" :
-    "Immediate detailed verification required"
-  );
+  const recommendation =
+    effectiveResult?.recommendation ||
+    (score != null
+      ? normalizedLevel === 'LOW'
+        ? "No major inconsistency detected across registry records."
+        : normalizedLevel === 'MEDIUM'
+        ? "Manual administrative review recommended."
+        : normalizedLevel === 'HIGH'
+        ? "Further verification required: Multiple significant discrepancies found."
+        : "Immediate detailed verification required."
+      : "Not available");
 
   return (
     <div className="space-y-6">
@@ -111,7 +117,7 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 no-print">
+        <div className="flex items-center gap-2 no-print flex-wrap">
           <button
             onClick={() => window.print()}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md"
@@ -121,6 +127,15 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
             </svg>
             <span>Print / PDF Audit</span>
+          </button>
+          <button
+            onClick={handleGoToHistory}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-semibold text-xs md:text-sm rounded-lg transition-all shadow-md cursor-pointer"
+          >
+            <span>View Ownership History</span>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
           </button>
         </div>
       </div>
@@ -195,7 +210,7 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
                     <span className="text-sm font-bold text-white">{recommendation}</span>
                   </div>
                   <span className="text-xs font-mono font-bold px-3 py-1 bg-slate-800 rounded border border-slate-700 text-slate-300">
-                    {score} / 100 Pts
+                    {score != null ? `${score} / 100 Pts` : 'Not available'}
                   </span>
                 </div>
               </div>
@@ -207,47 +222,54 @@ export default function RiskScoreView({ activeDocument, verificationResult }) {
             <h3 className="text-base font-bold text-white">Transparent Anomaly Point Breakdown</h3>
 
             <div className="space-y-3">
-              {breakdown.map((item, idx) => (
-                <div key={idx} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{item.title || item.issue_type || item.anomaly_type}</span>
-                      {Number(item.points_added) > 0 ? (
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800">
-                          +{item.points_added} Points Added
-                        </span>
-                      ) : (
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
-                          0 Points (Informational)
-                        </span>
-                      )}
+              {breakdown.length > 0 ? (
+                breakdown.map((item, idx) => (
+                  <div key={idx} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">{item.title || item.issue_type || item.anomaly_type}</span>
+                        {Number(item.points_added) > 0 ? (
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800">
+                            +{item.points_added} Points Added
+                          </span>
+                        ) : (
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800">
+                            0 Points (Informational)
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {item.severity ? `${item.severity} Severity` : "Info"}
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-400 font-mono">
-                      {item.severity ? `${item.severity} Severity` : "Info"}
-                    </span>
+                    {item.reason_for_points && (
+                      <div className="text-xs text-blue-300/90 font-medium">
+                        ↳ {item.reason_for_points}
+                      </div>
+                    )}
+                    {item.expected && item.found && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
+                        <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold block">Expected</span>
+                          {item.expected}
+                        </div>
+                        <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                          <span className="text-[10px] text-slate-500 uppercase font-bold block">Found</span>
+                          {item.found}
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-400 leading-relaxed pt-1">
+                      {item.description}
+                    </p>
                   </div>
-                  {item.reason_for_points && (
-                    <div className="text-xs text-blue-300/90 font-medium">
-                      ↳ {item.reason_for_points}
-                    </div>
-                  )}
-                  {item.expected && item.found && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Expected</span>
-                        {item.expected}
-                      </div>
-                      <div className="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Found</span>
-                        {item.found}
-                      </div>
-                    </div>
-                  )}
-                  <p className="text-xs text-slate-400 leading-relaxed pt-1">
-                    {item.description}
-                  </p>
+                ))
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-950 border border-emerald-900/40 text-emerald-300 text-xs flex items-center gap-2">
+                  <span>✓</span>
+                  <span>No record inconsistencies or fraud anomalies detected for this document.</span>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </>

@@ -223,7 +223,12 @@ def _extract_text_pure_python_streams(pdf_path: str) -> str:
                     pass
 
             if decomp is None:
-                continue
+                if b'BT' in s and b'ET' in s:
+                    decomp = s
+                elif b'(' in s and b')' in s:
+                    decomp = s
+                else:
+                    continue
 
             decomp_str = decomp.decode('latin1', errors='ignore')
 

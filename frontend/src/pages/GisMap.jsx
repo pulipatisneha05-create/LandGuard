@@ -2,14 +2,15 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, Polygon, ScaleControl, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getGisParcelsApi, getRiskAssessmentApi } from '../api/config';
+import { getGisParcelsApi, getRiskAssessmentApi, getVerificationApi } from '../api/config';
 import { mockGisParcelData } from '../data/mockData';
 import { fallbackGeoJson } from '../data/parcelsGeoJson';
+import { evaluateDocumentRisk } from '../utils/verificationEvaluator';
+import StatusBadge from '../components/StatusBadge';
+import RiskScoreBadge from '../components/RiskScoreBadge';
 import {
   MapPin,
   Layers,
-  Search,
-  X,
   AlertTriangle,
   CheckCircle2,
   Info,
@@ -19,10 +20,12 @@ import {
   WifiOff,
   Crosshair,
   ShieldAlert,
-  AlertCircle
+  AlertCircle,
+  FileText,
+  Upload
 } from 'lucide-react';
 
-// Survey number matching utility with prefix normalization
+// Survey number matching utility with prefix and punctuation normalization
 export function isSurveyMatch(surveyA, surveyB) {
   if (!surveyA || !surveyB) return false;
   const a = String(surveyA).trim().toUpperCase();
@@ -30,8 +33,8 @@ export function isSurveyMatch(surveyA, surveyB) {
   if (a === b) return true;
 
   // Normalize by stripping common prefixes like SYN-, SY-, SURVEY-, TEST-, DEMO-
-  const cleanA = a.replace(/^(SYN-|SY-|SURVEY-)/, '').replace(/^(TEST-|DEMO-)/, '');
-  const cleanB = b.replace(/^(SYN-|SY-|SURVEY-)/, '').replace(/^(TEST-|DEMO-)/, '');
+  const cleanA = a.replace(/^(SYN-|SY-|SURVEY-|TEST-|DEMO-)+/, '');
+  const cleanB = b.replace(/^(SYN-|SY-|SURVEY-|TEST-|DEMO-)+/, '');
   if (cleanA === cleanB) return true;
 
   // Strip slashes, spaces, hyphens
@@ -49,44 +52,399 @@ export function isSurveyMatch(surveyA, surveyB) {
   return false;
 }
 
-// Subcomponent to handle programmatic map pan/zoom animations
+// Map score to standard risk category: LOW (0-29), MEDIUM (30-59), HIGH (60-79), CRITICAL (80-100)
+export function getRiskTier(score, explicitLevel) {
+  if (explicitLevel && typeof explicitLevel === 'string') {
+    const norm = explicitLevel.toUpperCase();
+    if (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(norm)) return norm;
+  }
+  if (score !== null && score !== undefined && !isNaN(Number(score))) {
+    const num = Number(score);
+    if (num >= 80) return 'CRITICAL';
+    if (num >= 60) return 'HIGH';
+    if (num >= 30) return 'MEDIUM';
+    return 'LOW';
+  }
+  return 'LOW';
+}
+
+// Risk palette adhering to specifications:
+// LOW: Green, MEDIUM: Yellow/Orange, HIGH: Red, CRITICAL: Purple
+export function getRiskColorDef(tier) {
+  switch (tier) {
+    case 'CRITICAL':
+      return {
+        tier: 'CRITICAL',
+        fill: '#a855f7', // purple-500
+        stroke: '#c084fc', // purple-300
+        border: 'border-purple-800',
+        bg: 'bg-purple-950/80',
+        text: 'text-purple-300',
+        badge: 'bg-purple-950 text-purple-300 border-purple-800'
+      };
+    case 'HIGH':
+      return {
+        tier: 'HIGH',
+        fill: '#ef4444', // red-500
+        stroke: '#f87171', // red-400
+        border: 'border-rose-900',
+        bg: 'bg-rose-950/80',
+        text: 'text-rose-400',
+        badge: 'bg-rose-950 text-rose-300 border-rose-800'
+      };
+    case 'MEDIUM':
+      return {
+        tier: 'MEDIUM',
+        fill: '#f59e0b', // amber-500
+        stroke: '#fbbf24', // amber-300
+        border: 'border-amber-800',
+        bg: 'bg-amber-950/80',
+        text: 'text-amber-400',
+        badge: 'bg-amber-950 text-amber-300 border-amber-800'
+      };
+    case 'LOW':
+    default:
+      return {
+        tier: 'LOW',
+        fill: '#10b981', // emerald-500
+        stroke: '#34d399', // emerald-400
+        border: 'border-emerald-800',
+        bg: 'bg-emerald-950/80',
+        text: 'text-emerald-400',
+        badge: 'bg-emerald-950 text-emerald-300 border-emerald-800'
+      };
+  }
+}
+
+// Generate human-readable explanation of why a risk factor matters
+function getReasonExplanation(type, item) {
+  const norm = String(type || '').toUpperCase();
+  if (norm.includes('OWNER')) {
+    return 'The executant or seller named in the document differs from the registered owner in the revenue records, indicating potential title discontinuity.';
+  }
+  if (norm.includes('SURVEY')) {
+    return 'The claimed survey number does not align with official cadastral sub-divisions in the registry.';
+  }
+  if (norm.includes('AREA') || norm.includes('ACRE')) {
+    return 'The deed claims a land extent that differs from the registered cadastral area, signaling potential boundary inflation or encroachment.';
+  }
+  if (norm.includes('SPATIAL') || norm.includes('LOCATION') || norm.includes('GIS') || norm.includes('BOUNDARY')) {
+    return 'Document spatial coordinates or village boundary do not match the registered cadastral polygon boundaries.';
+  }
+  if (norm.includes('DUPLICATE')) {
+    return 'Multiple active deeds or rapid transactions have been registered under this survey number, requiring title integrity verification.';
+  }
+  if (norm.includes('RAPID')) {
+    return 'Multiple transfers in a brief timeframe suggest speculative turnover or irregular mutation.';
+  }
+  if (norm.includes('HISTORY') || norm.includes('CHAIN') || norm.includes('SELLER')) {
+    return 'The title chain lacks historical continuity linking the current vendor to prior registered grant records.';
+  }
+  if (norm.includes('OCR') || norm.includes('INCOMPLETE') || norm.includes('CONFIDENCE')) {
+    return 'Key legal text or declarations could not be extracted with high confidence from the uploaded document.';
+  }
+  return item?.description || 'Identified as a risk indicator requiring administrative verification with revenue authorities.';
+}
+
+// Extract specific reasons from actual verification result, breakdown, and field matches
+function extractRiskReasons(assessment, verification) {
+  const reasons = [];
+  const seenTypes = new Set();
+
+  // 1. From scoring_breakdown
+  const breakdown = assessment?.scoring_breakdown || verification?.scoring_breakdown || [];
+  for (const item of breakdown) {
+    const pts = Number(item.points_added) || 0;
+    const type = item.issue_type || item.type || item.title || 'UNKNOWN';
+    if (pts > 0 && !seenTypes.has(type)) {
+      seenTypes.add(type);
+      reasons.push({
+        id: `bd-${type}`,
+        type,
+        title: item.title || type.replace(/_/g, ' '),
+        points: pts,
+        severity: item.severity || (pts >= 25 ? 'High' : pts >= 15 ? 'Medium' : 'Low'),
+        whyItMatters: item.reason_for_points || item.description || getReasonExplanation(type, item)
+      });
+    }
+  }
+
+  // 2. From detected_anomalies
+  const anomalies = verification?.detected_anomalies || assessment?.detected_anomalies || [];
+  for (const a of anomalies) {
+    const type = a.type || a.issue_type || a.title || 'UNKNOWN';
+    if (a.category === 'Reference Status' || type === 'REFERENCE_RECORD_NOT_AVAILABLE') {
+      continue;
+    }
+    if (!seenTypes.has(type)) {
+      seenTypes.add(type);
+      const pts = Number(a.points_added) || 0;
+      reasons.push({
+        id: `an-${type}`,
+        type,
+        title: a.title || type.replace(/_/g, ' '),
+        points: pts,
+        severity: a.severity || 'High',
+        whyItMatters: a.reason_for_points || a.description || getReasonExplanation(type, a)
+      });
+    }
+  }
+
+  // 3. From field_matches if present
+  const fieldMatches = verification?.field_matches;
+  if (fieldMatches) {
+    if (fieldMatches.owner_match === false && !seenTypes.has('OWNER_NAME_MISMATCH')) {
+      seenTypes.add('OWNER_NAME_MISMATCH');
+      reasons.push({
+        id: 'fm-owner',
+        type: 'OWNER_NAME_MISMATCH',
+        title: 'Owner Name Mismatch',
+        points: 25,
+        severity: 'High',
+        whyItMatters: 'The executant or seller named in the deed does not match the registered owner recorded in the revenue registry.'
+      });
+    }
+    if (fieldMatches.survey_number_match === false && !seenTypes.has('SURVEY_NUMBER_MISMATCH')) {
+      seenTypes.add('SURVEY_NUMBER_MISMATCH');
+      reasons.push({
+        id: 'fm-survey',
+        type: 'SURVEY_NUMBER_MISMATCH',
+        title: 'Survey Number Mismatch',
+        points: 20,
+        severity: 'High',
+        whyItMatters: 'The claimed survey number does not align with the revenue cadastral records.'
+      });
+    }
+    if (fieldMatches.land_area_match === false && !seenTypes.has('LAND_AREA_MISMATCH')) {
+      seenTypes.add('LAND_AREA_MISMATCH');
+      reasons.push({
+        id: 'fm-area',
+        type: 'LAND_AREA_MISMATCH',
+        title: 'Land Area Discrepancy',
+        points: 20,
+        severity: 'High',
+        whyItMatters: 'Claimed deed acreage deviates from the registered cadastral parcel boundary, indicating possible area inflation or overlap.'
+      });
+    }
+  }
+
+  return reasons;
+}
+
+// Subcomponent to handle programmatic map pan/zoom to the active parcel
 function MapController({ targetBounds, resetKey, defaultCenter, defaultZoom }) {
   const map = useMap();
 
+  // Invalidate map size after mount and with staggered timeouts so tiles calculate correctly
   useEffect(() => {
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 250);
-    return () => clearTimeout(timer);
+    map.invalidateSize();
+    const t1 = setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch (e) {}
+    }, 100);
+    const t2 = setTimeout(() => {
+      try {
+        map.invalidateSize();
+      } catch (e) {}
+    }, 350);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [map]);
 
+  // Safe fitBounds: verifies bounds are valid and map container has measurable non-zero dimensions
   useEffect(() => {
-    if (targetBounds && typeof targetBounds.isValid === 'function' && targetBounds.isValid()) {
-      map.fitBounds(targetBounds, { padding: [60, 60], maxZoom: 16 });
+    if (!targetBounds || typeof targetBounds.isValid !== 'function' || !targetBounds.isValid()) {
+      return;
     }
+
+    const fitTimer = setTimeout(() => {
+      try {
+        const size = map.getSize();
+        if (size && size.x > 100 && size.y > 100) {
+          map.fitBounds(targetBounds, { padding: [40, 40], maxZoom: 16 });
+        } else {
+          // If size is still 0 (layout resolving), force invalidateSize and retry
+          map.invalidateSize();
+          setTimeout(() => {
+            try {
+              const retrySize = map.getSize();
+              if (retrySize && retrySize.x > 100 && retrySize.y > 100) {
+                map.fitBounds(targetBounds, { padding: [30, 30], maxZoom: 16 });
+              }
+            } catch (err) {}
+          }, 200);
+        }
+      } catch (err) {
+        console.warn("Map fitBounds notice:", err);
+      }
+    }, 150);
+
+    return () => clearTimeout(fitTimer);
   }, [targetBounds, map]);
 
+  // Reset view button handler
   useEffect(() => {
     if (resetKey > 0) {
-      map.flyTo(defaultCenter, defaultZoom, { duration: 1.2 });
+      try {
+        map.invalidateSize();
+        if (targetBounds && typeof targetBounds.isValid === 'function' && targetBounds.isValid()) {
+          const size = map.getSize();
+          if (size && size.x > 100 && size.y > 100) {
+            map.fitBounds(targetBounds, { padding: [40, 40], maxZoom: 16 });
+            return;
+          }
+        }
+        map.flyTo(defaultCenter, defaultZoom, { duration: 1.0 });
+      } catch (e) {
+        console.warn("Map reset notice:", e);
+      }
     }
-  }, [resetKey, defaultCenter, defaultZoom, map]);
+  }, [resetKey, targetBounds, defaultCenter, defaultZoom, map]);
 
   return null;
 }
 
-export default function GisMap({ activeDocument, verificationResult }) {
-  // Use fallback bundled synthetic GeoJSON as instant baseline data
-  const [geoData, setGeoData] = useState(fallbackGeoJson);
-  const [selectedParcel, setSelectedParcel] = useState(null);
-  const [selectedFeature, setSelectedFeature] = useState(null);
-  const [activeLayer, setActiveLayer] = useState('cadastral'); // 'cadastral' | 'satellite' | 'encumbrance'
-  const [searchQuery, setSearchQuery] = useState('');
-  const [riskFilter, setRiskFilter] = useState('ALL'); // 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'DISPUTED'
-  const [resetKey, setResetKey] = useState(0);
-  const [apiSource, setApiSource] = useState('local'); // 'live' | 'local'
-  const [isLoading, setIsLoading] = useState(false);
+export default function GisMap({ activeDocument, verificationResult, onNavigate }) {
+  // 1. Resolve active document from props or sessionStorage
+  const effectiveDocument = useMemo(() => {
+    if (activeDocument) return activeDocument;
+    try {
+      const saved = sessionStorage.getItem('landguard_active_doc');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  }, [activeDocument]);
+
+  // 2. Resolve verification from props or sessionStorage
+  const storedVerification = useMemo(() => {
+    if (verificationResult) return verificationResult;
+    try {
+      const saved = sessionStorage.getItem('landguard_verification');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  }, [verificationResult]);
+
+  // Document fields extraction
+  const docFields = effectiveDocument?.extracted_nlp_fields || effectiveDocument?.extracted_fields || {};
+  const docId = effectiveDocument?.document_id || effectiveDocument?.id || null;
+  const docSurvey = docFields.survey_number || effectiveDocument?.survey_number || null;
+  const docOwner = docFields.owner_name || effectiveDocument?.owner_name || null;
+
+  // Land Area resolution
+  const docArea = docFields.land_area_raw ||
+                  (docFields.land_area_normalized_acres != null ? `${docFields.land_area_normalized_acres} Acres` : null) ||
+                  (docFields.land_area_acres != null ? `${docFields.land_area_acres} Acres` : null) ||
+                  (docFields.land_area ? `${docFields.land_area} ${docFields.land_area_unit || 'Acres'}` : null) ||
+                  (effectiveDocument?.land_area ? `${effectiveDocument.land_area} ${effectiveDocument.land_area_unit || 'Acres'}` : null);
+
+  // Village / Mandal resolution
+  const docVillage = docFields.village || effectiveDocument?.village || null;
+  const docMandal = docFields.mandal || effectiveDocument?.mandal || null;
+  const villageMandalDisplay = (docVillage && docMandal)
+    ? `${docVillage}, ${docMandal}`
+    : docVillage || docMandal || 'Not available';
+
+  // District resolution
+  const docDistrict = docFields.district || effectiveDocument?.district || null;
+  const docState = docFields.state || effectiveDocument?.state || null;
+  const districtDisplay = docDistrict
+    ? (docState ? `${docDistrict}, ${docState}` : docDistrict)
+    : 'Not available';
+
+  // 3. Live Assessment & Verification API Fetching (if needed)
   const [fetchedAssessment, setFetchedAssessment] = useState(null);
+  const [fetchedVerification, setFetchedVerification] = useState(null);
+
+  useEffect(() => {
+    if (docId) {
+      if (!storedVerification || storedVerification.risk_score == null) {
+        getRiskAssessmentApi(docId)
+          .then((data) => setFetchedAssessment(data))
+          .catch((err) => console.warn('GIS notice: could not load live risk assessment:', err.message));
+      }
+      if (!storedVerification || !storedVerification.detected_anomalies) {
+        getVerificationApi(docId)
+          .then((data) => setFetchedVerification(data))
+          .catch((err) => console.warn('GIS notice: could not load live verification:', err.message));
+      }
+    }
+  }, [docId, storedVerification]);
+
+  const evaluatedLocal = useMemo(() => {
+    if ((!storedVerification || storedVerification.risk_score == null) &&
+        !fetchedAssessment && !fetchedVerification && effectiveDocument) {
+      return evaluateDocumentRisk(effectiveDocument);
+    }
+    return null;
+  }, [storedVerification, fetchedAssessment, fetchedVerification, effectiveDocument]);
+
+  const effectiveAssessment = useMemo(() => {
+    if (storedVerification && (!storedVerification.document_id || storedVerification.document_id === docId) && storedVerification.risk_score != null) {
+      return storedVerification;
+    }
+    return fetchedAssessment || evaluatedLocal || storedVerification;
+  }, [storedVerification, fetchedAssessment, evaluatedLocal, docId]);
+
+  const effectiveVerification = useMemo(() => {
+    if (storedVerification && (!storedVerification.document_id || storedVerification.document_id === docId) && storedVerification.risk_score != null) {
+      return storedVerification;
+    }
+    return fetchedVerification || evaluatedLocal || storedVerification;
+  }, [storedVerification, fetchedVerification, evaluatedLocal, docId]);
+
+  // Derived Risk Metrics
+  const docRiskScore = useMemo(() => {
+    if (effectiveAssessment && typeof effectiveAssessment.risk_score === 'number') {
+      return effectiveAssessment.risk_score;
+    }
+    if (effectiveVerification && typeof effectiveVerification.risk_score === 'number') {
+      return effectiveVerification.risk_score;
+    }
+    if (storedVerification && typeof storedVerification.risk_score === 'number') {
+      return storedVerification.risk_score;
+    }
+    if (effectiveDocument && typeof effectiveDocument.risk_score === 'number') {
+      return effectiveDocument.risk_score;
+    }
+    return null;
+  }, [effectiveAssessment, effectiveVerification, storedVerification, effectiveDocument]);
+
+  const docRiskLevel = useMemo(() => {
+    const rawLevel = effectiveAssessment?.risk_level ||
+                     effectiveVerification?.risk_level ||
+                     storedVerification?.risk_level ||
+                     effectiveDocument?.risk_level;
+    return getRiskTier(docRiskScore, rawLevel);
+  }, [effectiveAssessment, effectiveVerification, storedVerification, effectiveDocument, docRiskScore]);
+
+  const docVerificationStatus = useMemo(() => {
+    return effectiveVerification?.verification_status ||
+           effectiveAssessment?.verification_status ||
+           storedVerification?.verification_status ||
+           effectiveDocument?.verification_status ||
+           (effectiveDocument ? 'PENDING VERIFICATION' : null);
+  }, [effectiveVerification, effectiveAssessment, storedVerification, effectiveDocument]);
+
+  // Palette colors for active document's risk level
+  const riskColors = useMemo(() => getRiskColorDef(docRiskLevel), [docRiskLevel]);
+
+  // Extract risk reasons
+  const riskReasons = useMemo(() => {
+    return extractRiskReasons(effectiveAssessment, effectiveVerification);
+  }, [effectiveAssessment, effectiveVerification]);
+
+  // 4. GIS Parcel Data Loading
+  const [geoData, setGeoData] = useState(fallbackGeoJson);
+  const [apiSource, setApiSource] = useState('local');
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeLayer, setActiveLayer] = useState('cadastral'); // 'cadastral' | 'satellite' | 'encumbrance'
+  const [resetKey, setResetKey] = useState(0);
 
   const geoJsonRef = useRef(null);
 
@@ -94,73 +452,6 @@ export default function GisMap({ activeDocument, verificationResult }) {
   const defaultCenter = [17.405, 78.355];
   const defaultZoom = 12;
 
-  // Document metadata resolution
-  const docId = activeDocument?.document_id || activeDocument?.id || activeDocument?.documentId || null;
-  const docSurvey = activeDocument?.extracted_fields?.survey_number ||
-                    activeDocument?.extracted_survey_number ||
-                    activeDocument?.survey_number || null;
-  const docOwner = activeDocument?.extracted_fields?.owner_name ||
-                   activeDocument?.extracted_owner_name ||
-                   activeDocument?.owner_name || null;
-  const docArea = activeDocument?.extracted_fields?.land_area ??
-                  activeDocument?.extracted_fields?.land_area_numeric ??
-                  activeDocument?.extracted_land_area ??
-                  activeDocument?.land_area ?? null;
-  const docAreaUnit = activeDocument?.extracted_fields?.land_area_unit || 'Acres';
-
-  // Fetch live risk assessment if not passed in props or if document changed
-  useEffect(() => {
-    if (docId && (!verificationResult || (verificationResult.document_id && verificationResult.document_id !== docId))) {
-      getRiskAssessmentApi(docId)
-        .then((data) => setFetchedAssessment(data))
-        .catch((err) => console.warn("GIS notice: could not load live risk assessment:", err.message));
-    }
-  }, [docId, verificationResult]);
-
-  const effectiveAssessment = useMemo(() => {
-    if (verificationResult && (!verificationResult.document_id || verificationResult.document_id === docId)) {
-      return verificationResult;
-    }
-    return fetchedAssessment;
-  }, [verificationResult, fetchedAssessment, docId]);
-
-  // Derived document risk metrics
-  const docRiskScore = useMemo(() => {
-    if (effectiveAssessment && typeof effectiveAssessment.risk_score === 'number') {
-      return effectiveAssessment.risk_score;
-    }
-    if (activeDocument && typeof activeDocument.risk_score === 'number') {
-      return activeDocument.risk_score;
-    }
-    return null;
-  }, [effectiveAssessment, activeDocument]);
-
-  const docRiskLevel = useMemo(() => {
-    if (effectiveAssessment?.risk_level) return effectiveAssessment.risk_level.toUpperCase();
-    if (activeDocument?.risk_level) return activeDocument.risk_level.toUpperCase();
-    if (docRiskScore !== null) {
-      if (docRiskScore >= 80) return 'CRITICAL';
-      if (docRiskScore >= 60) return 'HIGH';
-      if (docRiskScore >= 30) return 'MEDIUM';
-      return 'LOW';
-    }
-    return null;
-  }, [effectiveAssessment, activeDocument, docRiskScore]);
-
-  const docVerificationStatus = useMemo(() => {
-    return effectiveAssessment?.verification_status ||
-           activeDocument?.verification_status ||
-           effectiveAssessment?.status_summary?.overall_status ||
-           '';
-  }, [effectiveAssessment, activeDocument]);
-
-  const isUnindexedDoc = useMemo(() => {
-    if (docVerificationStatus === 'REFERENCE_NOT_FOUND' || docVerificationStatus === 'UNINDEXED') return true;
-    if (docSurvey && String(docSurvey).toUpperCase().includes('UNINDEXED')) return true;
-    return false;
-  }, [docVerificationStatus, docSurvey]);
-
-  // Load live GIS parcels from backend if available, keeping fallback resilient
   useEffect(() => {
     setIsLoading(true);
     getGisParcelsApi(docId)
@@ -175,309 +466,180 @@ export default function GisMap({ activeDocument, verificationResult }) {
         setIsLoading(false);
       })
       .catch((err) => {
-        console.warn("GIS Backend API notice (using bundled synthetic GeoJSON fallback):", err.message);
+        console.warn('GIS Backend API notice (using bundled synthetic GeoJSON fallback):', err.message);
         setGeoData(fallbackGeoJson);
         setApiSource('local');
         setIsLoading(false);
       });
   }, [docId]);
 
-  // Features list
   const allFeatures = useMemo(() => geoData?.features || [], [geoData]);
 
-  // Initial selection on mount or when activeDocument changes
-  useEffect(() => {
-    if (!allFeatures || allFeatures.length === 0) return;
+  // 5. Match Active Document to its Parcel Geometry
+  const effectiveFeature = useMemo(() => {
+    if (!docSurvey && !effectiveDocument?.geometry) return null;
 
-    if (activeDocument && docSurvey) {
+    // Check if matched in cadastral GeoJSON features by survey number
+    if (docSurvey && allFeatures.length > 0) {
       const match = allFeatures.find((f) => isSurveyMatch(f.properties?.survey_number, docSurvey));
-      if (match) {
-        setSelectedParcel(match.properties);
-        setSelectedFeature(match);
-      } else {
-        // Document is unindexed / reference not found: DO NOT fallback to allFeatures[0]
-        setSelectedParcel(null);
-        setSelectedFeature(null);
-      }
-    } else if (!activeDocument) {
-      // Normal browse mode when no document is active
-      if (!selectedParcel) {
-        setSelectedParcel(allFeatures[0]?.properties || null);
-        setSelectedFeature(allFeatures[0] || null);
-      }
+      if (match) return match;
     }
-  }, [allFeatures, activeDocument, docSurvey]);
 
-  // Helper to resolve effective feature risk, separating document risk from reference risk
-  const getEffectiveFeatureRisk = (feature) => {
-    const p = feature?.properties || {};
-    const refRisk = (p.reference_risk_level || p.risk_level || 'LOW').toUpperCase();
-
-    // Check if this parcel is associated with the active analyzed document
-    const isDocLinked = Boolean(activeDocument && docSurvey && isSurveyMatch(p.survey_number, docSurvey));
-
-    if (isDocLinked) {
-      const isElevated = Boolean(
-        (docRiskScore !== null && docRiskScore >= 60) ||
-        (docRiskLevel === 'HIGH' || docRiskLevel === 'CRITICAL') ||
-        p.has_document_conflict
-      );
-
+    // Check if active document itself contains geometry
+    if (effectiveDocument?.geometry) {
       return {
-        isDocLinked: true,
-        riskLevel: isElevated ? (docRiskLevel || 'HIGH') : refRisk,
-        isElevatedByDoc: isElevated,
-        referenceRiskLevel: refRisk,
-        docRiskScore: docRiskScore ?? (isElevated ? 60 : 0),
-        docRiskLevel: docRiskLevel || (isElevated ? 'HIGH' : 'LOW')
+        type: 'Feature',
+        id: effectiveDocument.document_id || 'DOC-GEO',
+        properties: {
+          survey_number: docSurvey || 'Document Survey',
+          owner_name: docOwner || 'Not available',
+          land_area_acres: docArea || 'Not available',
+          village: docVillage || 'Not available',
+          mandal: docMandal || 'Not available',
+          district: docDistrict || 'Not available'
+        },
+        geometry: effectiveDocument.geometry
       };
     }
 
-    // Unlinked parcel: strictly reference parcel risk
-    return {
-      isDocLinked: false,
-      riskLevel: refRisk,
-      isElevatedByDoc: false,
-      referenceRiskLevel: refRisk,
-      docRiskScore: null,
-      docRiskLevel: null
-    };
-  };
+    return null;
+  }, [allFeatures, docSurvey, effectiveDocument, docOwner, docArea, docVillage, docMandal, docDistrict]);
 
-  // Dynamic search and filter logic
-  const filteredFeatures = useMemo(() => {
-    const rawQuery = searchQuery.trim().toLowerCase();
-    const queryClean = rawQuery.replace(/[\\/\-\s]/g, '');
+  const hasGeometry = Boolean(effectiveFeature);
 
-    return allFeatures.filter((feat) => {
-      const p = feat.properties || {};
-      const effective = getEffectiveFeatureRisk(feat);
-
-      // 1. Risk Tier Filter (respects elevated document risk when linked)
-      let matchesRisk = true;
-      if (riskFilter === 'DISPUTED') {
-        matchesRisk = (p.conflict_status && p.conflict_status !== 'Clean') || effective.isElevatedByDoc;
-      } else if (riskFilter !== 'ALL') {
-        matchesRisk = effective.riskLevel === riskFilter;
-      }
-      if (!matchesRisk) return false;
-
-      // 2. Search Query Filter (dynamic, case-insensitive, partial matching)
-      if (!rawQuery) return true;
-
-      const survey = String(p.survey_number || '').toLowerCase();
-      const surveyClean = survey.replace(/[\\/\-\s]/g, '');
-      const owner = String(p.owner_name || '').toLowerCase();
-      const village = String(p.village || '').toLowerCase();
-      const mandal = String(p.mandal || '').toLowerCase();
-      const district = String(p.district || '').toLowerCase();
-      const state = String(p.state || '').toLowerCase();
-      const locationFull = `${village} ${mandal} ${district} ${state}`.toLowerCase();
-      const locationClean = locationFull.replace(/[\\/\-\s]/g, '');
-
-      if (
-        survey.includes(rawQuery) ||
-        owner.includes(rawQuery) ||
-        village.includes(rawQuery) ||
-        mandal.includes(rawQuery) ||
-        district.includes(rawQuery) ||
-        locationFull.includes(rawQuery)
-      ) {
-        return true;
-      }
-
-      if (queryClean.length >= 2) {
-        if (surveyClean.includes(queryClean) || locationClean.includes(queryClean)) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-  }, [allFeatures, searchQuery, riskFilter, activeDocument, docSurvey, docRiskScore, docRiskLevel]);
-
-  // Handle selecting a parcel from list or search results
-  const handleSelectParcel = (feat) => {
-    if (!feat) return;
-    setSelectedParcel(feat.properties);
-    setSelectedFeature(feat);
-  };
-
-  // Compute selected parcel bounds for map zoom
+  // Compute selected parcel bounds for map focus
   const targetBounds = useMemo(() => {
-    if (!selectedFeature) return null;
+    if (!effectiveFeature) return null;
     try {
-      return L.geoJSON(selectedFeature).getBounds();
+      const bounds = L.geoJSON(effectiveFeature).getBounds();
+      return (bounds && typeof bounds.isValid === 'function' && bounds.isValid()) ? bounds : null;
     } catch (e) {
       return null;
     }
-  }, [selectedFeature]);
+  }, [effectiveFeature]);
 
   // Centroid calculation for selected parcel
   const centroid = useMemo(() => {
-    if (!selectedFeature) return null;
+    if (!effectiveFeature) return null;
     try {
-      const bounds = L.geoJSON(selectedFeature).getBounds();
+      const bounds = L.geoJSON(effectiveFeature).getBounds();
+      if (!bounds || typeof bounds.isValid !== 'function' || !bounds.isValid()) return null;
       const c = bounds.getCenter();
+      if (!c || isNaN(c.lat) || isNaN(c.lng)) return null;
       return { lat: c.lat.toFixed(5), lng: c.lng.toFixed(5) };
     } catch (e) {
       return null;
     }
-  }, [selectedFeature]);
+  }, [effectiveFeature]);
 
-  // Risk styling palette
-  const getRiskColor = (riskLevel) => {
-    switch (riskLevel?.toUpperCase()) {
-      case 'CRITICAL':
-        return { fill: '#a855f7', stroke: '#7e22ce', text: 'text-purple-300', bg: 'bg-purple-950', border: 'border-purple-800' };
-      case 'HIGH':
-        return { fill: '#f43f5e', stroke: '#be123c', text: 'text-rose-400', bg: 'bg-rose-950', border: 'border-rose-900' };
-      case 'MEDIUM':
-        return { fill: '#f59e0b', stroke: '#b45309', text: 'text-amber-300', bg: 'bg-amber-950', border: 'border-amber-800' };
-      case 'LOW':
-      default:
-        return { fill: '#10b981', stroke: '#047857', text: 'text-emerald-300', bg: 'bg-emerald-950', border: 'border-emerald-800' };
-    }
-  };
-
-  // GeoJSON style callback
+  // 6. Map Polygon Styling
   const getFeatureStyle = (feature) => {
     const p = feature.properties || {};
-    const effective = getEffectiveFeatureRisk(feature);
-    const risk = getRiskColor(effective.riskLevel);
-
-    const isSelected = selectedParcel && (
-      (selectedFeature && selectedFeature.id && feature.id && selectedFeature.id === feature.id) ||
-      (selectedParcel.survey_number === p.survey_number && selectedParcel.owner_name === p.owner_name) ||
-      (selectedParcel.survey_number === p.survey_number)
+    const isUploadedParcel = Boolean(
+      (effectiveFeature && effectiveFeature.id && feature.id && effectiveFeature.id === feature.id) ||
+      (docSurvey && isSurveyMatch(p.survey_number, docSurvey))
     );
-    const isDisputed = (p.conflict_status && p.conflict_status !== 'Clean') || effective.isElevatedByDoc;
 
-    if (activeLayer === 'encumbrance') {
-      if (isDisputed) {
-        return {
-          fillColor: '#dc2626',
-          fillOpacity: isSelected ? 0.80 : 0.55,
-          color: isSelected ? '#38bdf8' : '#ef4444',
-          weight: isSelected ? 4 : 2.5,
-          dashArray: isSelected ? null : '5, 5'
-        };
-      }
+    // Selected / Active Uploaded Parcel Highlighting
+    if (isUploadedParcel) {
       return {
-        fillColor: risk.fill,
-        fillOpacity: 0.15,
-        color: '#64748b',
-        weight: 1,
-        dashArray: null
-      };
-    }
-
-    if (isSelected) {
-      return {
-        fillColor: risk.fill,
+        fillColor: riskColors.fill,
         fillOpacity: 0.75,
-        color: '#38bdf8', // high-visibility sky-400 cyan selection border
+        color: riskColors.stroke,
         weight: 4,
         dashArray: null
       };
     }
 
-    if (effective.isElevatedByDoc) {
-      // Highlight parcel associated with suspicious / high-risk document
+    // Encumbrance mode
+    if (activeLayer === 'encumbrance') {
+      const isDisputed = p.conflict_status && p.conflict_status !== 'Clean';
+      if (isDisputed) {
+        return {
+          fillColor: '#dc2626',
+          fillOpacity: 0.50,
+          color: '#ef4444',
+          weight: 2,
+          dashArray: '5, 5'
+        };
+      }
       return {
-        fillColor: '#f43f5e',
-        fillOpacity: 0.65,
-        color: '#be123c',
-        weight: 3,
+        fillColor: '#64748b',
+        fillOpacity: 0.12,
+        color: '#475569',
+        weight: 1,
         dashArray: null
       };
     }
 
+    // Satellite hybrid mode
     if (activeLayer === 'satellite') {
       return {
-        fillColor: risk.fill,
-        fillOpacity: 0.35,
-        color: '#ffffff',
-        weight: 2,
+        fillColor: '#334155',
+        fillOpacity: 0.20,
+        color: '#cbd5e1',
+        weight: 1.5,
         dashArray: null
       };
     }
 
+    // Cadastral view for other background reference parcels
     return {
-      fillColor: risk.fill,
-      fillOpacity: 0.40,
-      color: risk.stroke,
-      weight: 1.5,
+      fillColor: '#1e293b',
+      fillOpacity: 0.20,
+      color: '#475569',
+      weight: 1,
       dashArray: null
     };
   };
 
-  // GeoJSON event callback
+  // Tooltip & hover behavior
   const onEachFeature = (feature, layer) => {
     const p = feature.properties || {};
-    const effective = getEffectiveFeatureRisk(feature);
+    const isUploadedParcel = Boolean(
+      (effectiveFeature && effectiveFeature.id && feature.id && effectiveFeature.id === feature.id) ||
+      (docSurvey && isSurveyMatch(p.survey_number, docSurvey))
+    );
 
     const tooltipContent = `
       <div class="text-xs space-y-1">
         <div class="font-bold text-white font-mono flex items-center justify-between gap-2">
           <span>Survey ${p.survey_number || 'N/A'}</span>
-          ${effective.isDocLinked ? '<span class="text-[9px] bg-blue-900 text-blue-200 px-1 py-0.2 rounded font-sans">Active Doc Match</span>' : ''}
+          ${isUploadedParcel ? '<span class="text-[9px] bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded font-sans font-bold">Active Uploaded Parcel</span>' : ''}
         </div>
         <div class="text-slate-300">Reg. Owner: ${p.owner_name || 'No Owner'}</div>
         <div class="text-slate-400 text-[11px]">${p.land_area_acres || '0'} Acres • ${p.village || 'N/A'}</div>
-        <div class="border-t border-slate-700/80 pt-1 mt-1 text-[11px] flex flex-col gap-0.5">
-          <div class="text-slate-400">Reference Parcel Risk: <span class="font-semibold ${
-            effective.referenceRiskLevel === 'CRITICAL' ? 'text-purple-400' :
-            effective.referenceRiskLevel === 'HIGH' ? 'text-rose-400' :
-            effective.referenceRiskLevel === 'MEDIUM' ? 'text-amber-400' :
-            'text-emerald-400'
-          }">${effective.referenceRiskLevel}</span></div>
-          ${effective.isDocLinked ? `
-            <div class="font-semibold ${
-              effective.docRiskLevel === 'HIGH' || effective.docRiskLevel === 'CRITICAL' ? 'text-rose-400' : 'text-emerald-400'
-            }">Document Risk: ${effective.docRiskLevel || 'LOW'} (${effective.docRiskScore}/100)</div>
-            ${effective.isElevatedByDoc ? '<div class="text-rose-300 font-bold text-[10px]">⚠️ Document Title / Extent Anomaly</div>' : ''}
-          ` : ''}
-        </div>
+        ${isUploadedParcel ? `
+          <div class="border-t border-slate-700/80 pt-1 mt-1 text-[11px]">
+            <div class="font-semibold ${riskColors.text}">Risk Assessment: ${docRiskLevel} (${docRiskScore ?? 0}/100)</div>
+          </div>
+        ` : ''}
       </div>
     `;
 
     layer.bindTooltip(tooltipContent, { sticky: true, opacity: 0.95, className: 'leaflet-custom-tooltip' });
 
     layer.on({
-      click: () => {
-        handleSelectParcel(feature);
-      },
       mouseover: (e) => {
-        e.target.setStyle({
-          weight: 3.5,
-          color: '#38bdf8',
-          fillOpacity: 0.75
-        });
+        if (!isUploadedParcel) {
+          e.target.setStyle({
+            weight: 2.5,
+            color: '#38bdf8',
+            fillOpacity: 0.40
+          });
+        }
       },
       mouseout: (e) => {
-        if (geoJsonRef.current) {
-          geoJsonRef.current.resetStyle(e.target);
-        }
+        try {
+          if (geoJsonRef.current && typeof geoJsonRef.current.resetStyle === 'function') {
+            geoJsonRef.current.resetStyle(e.target);
+          } else if (e.target && typeof e.target.setStyle === 'function') {
+            e.target.setStyle(getFeatureStyle(feature));
+          }
+        } catch (err) {}
       }
     });
   };
-
-  // Determine linkage status of selected parcel
-  const isLinkedToActiveDoc = Boolean(
-    activeDocument &&
-    docSurvey &&
-    selectedParcel &&
-    isSurveyMatch(selectedParcel.survey_number, docSurvey)
-  );
-
-  const selectedRefRisk = (selectedParcel?.reference_risk_level || selectedParcel?.risk_level || 'LOW').toUpperCase();
-  const selectedRefRiskColor = getRiskColor(selectedRefRisk);
-  const selectedEffective = selectedFeature
-    ? getEffectiveFeatureRisk(selectedFeature)
-    : selectedParcel
-    ? getEffectiveFeatureRisk({ properties: selectedParcel })
-    : null;
 
   return (
     <div className="space-y-6">
@@ -491,7 +653,7 @@ export default function GisMap({ activeDocument, verificationResult }) {
             </h2>
             <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800 flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5" />
-              Interactive React Leaflet Engine
+              Cadastral Spatial Engine
             </span>
             <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold border flex items-center gap-1 ${
               apiSource === 'live'
@@ -503,7 +665,7 @@ export default function GisMap({ activeDocument, verificationResult }) {
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time interactive Cadastral polygon boundaries mapped to Ranga Reddy district, Telangana revenue registries.
+            Spatial polygon boundary analysis aligned with the active uploaded land deed and revenue registry.
           </p>
         </div>
 
@@ -542,77 +704,14 @@ export default function GisMap({ activeDocument, verificationResult }) {
         </div>
       </div>
 
-      {/* Active Document Context Banner */}
-      {activeDocument && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start md:items-center gap-3">
-            <div className={`p-2.5 rounded-xl shrink-0 ${
-              isUnindexedDoc
-                ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
-                : docRiskScore >= 60
-                ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-            }`}>
-              {isUnindexedDoc ? (
-                <AlertCircle className="w-5 h-5 text-amber-400" />
-              ) : docRiskScore >= 60 ? (
-                <ShieldAlert className="w-5 h-5 text-rose-400" />
-              ) : (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-mono font-bold text-slate-400">Active Document:</span>
-                <span className="text-sm font-bold text-white font-mono">{docId || 'Uploaded Deed'}</span>
-                <span className="text-xs text-slate-400">• Survey <strong className="text-blue-300 font-mono">{docSurvey || 'N/A'}</strong></span>
-                {docOwner && <span className="text-xs text-slate-400">• Executant: <strong className="text-slate-200">{docOwner}</strong></span>}
-                {docArea && <span className="text-xs text-slate-400">• Claimed: <strong className="text-slate-200">{docArea} {docAreaUnit}</strong></span>}
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                {isUnindexedDoc
-                  ? 'Reference Not Found / Unindexed — No cadastral polygon match in registry. Missing reference alone does not imply fraud.'
-                  : docRiskScore >= 60
-                  ? `High-risk title conflict detected on Survey ${docSurvey}. Cadastral reference polygon highlighted with elevated risk.`
-                  : `Document claims verified against Cadastral Parcel ${docSurvey}. Clean title concordance.`}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <div className={`px-3 py-1.5 rounded-xl border text-center ${
-              isUnindexedDoc
-                ? 'bg-amber-950/60 border-amber-800 text-amber-300'
-                : docRiskScore >= 60
-                ? 'bg-rose-950/60 border-rose-800 text-rose-300'
-                : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-            }`}>
-              <div className="text-[10px] font-bold uppercase tracking-wider">Document Risk</div>
-              <div className="text-sm font-black font-mono">
-                {isUnindexedDoc ? 'UNINDEXED' : `${docRiskLevel || 'LOW'} (${docRiskScore ?? 0}/100)`}
-              </div>
-            </div>
-
-            {selectedParcel && (
-              <div className="px-3 py-1.5 rounded-xl border bg-slate-950 border-slate-800 text-slate-300 text-center">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Linked Parcel</div>
-                <div className="text-sm font-bold font-mono text-blue-400">
-                  Survey {selectedParcel.survey_number}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Layer Honest Notice Banner */}
+      {/* Layer Notice Banners */}
       {activeLayer === 'satellite' && (
         <div className="bg-blue-950/40 border border-blue-800/60 rounded-xl p-3 text-xs text-blue-200 flex items-start gap-2.5 shadow-sm">
           <Info className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
           <div>
             <strong>Satellite Hybrid Mode:</strong> High-resolution global satellite imagery rendered via <em>Esri World Imagery</em>.
             <span className="block text-blue-300/80 mt-0.5">
-              Notice: Displayed cadastral parcel boundaries are synthetic benchmark polygons in Ranga Reddy district. Official sub-meter government cadastral satellite overlays require Telangana Survey & Land Records ETS/DGPS ground control points.
+              Notice: Displayed cadastral parcel boundaries are synthetic benchmark polygons in Ranga Reddy district. Official sub-meter cadastral satellite overlays require Telangana Survey & Land Records ETS/DGPS ground control points.
             </span>
           </div>
         </div>
@@ -622,154 +721,52 @@ export default function GisMap({ activeDocument, verificationResult }) {
         <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-3 text-xs text-amber-200 flex items-start gap-2.5 shadow-sm">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <div>
-            <strong>Disputed Overlaps Mode:</strong> Filtering and highlighting synthetic boundary disputes (Survey 501/A duplicate sale, Survey 402/B 0.65-acre encroachment, Survey 601/A rapid flipping, Survey 201/A identity mismatch).
+            <strong>Disputed Overlaps Mode:</strong> Filtering and highlighting synthetic boundary disputes.
             <span className="block text-amber-300/80 mt-0.5">
-              Notice: The overlapping red dashed polygon visualizes claimed vs. registered deed coordinates for flagged parcels. Automated geometric polygonal intersection calculation requires PostGIS geometry extensions.
+              Notice: The overlapping red dashed polygon visualizes claimed vs. registered deed coordinates for flagged parcels.
             </span>
           </div>
         </div>
       )}
 
-      {/* Main 3-Column Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Parcel Search & Selector List */}
-        <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg flex flex-col h-[580px]">
-          <div className="border-b border-slate-800 pb-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-blue-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">GeoJSON Parcels</h3>
-            </div>
-            <span className="text-[10px] font-mono text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900">
-              {filteredFeatures.length} / {allFeatures.length}
-            </span>
-          </div>
-
-          {/* Search Input with Clear Button */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search survey, owner, or village..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-8 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1.5 text-slate-400 hover:text-white transition-colors p-1 rounded-full hover:bg-slate-800"
-                title="Clear search"
-                aria-label="Clear search"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Risk Filter Buttons */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px] font-semibold">
-            {['ALL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'DISPUTED'].map((tier) => (
-              <button
-                key={tier}
-                onClick={() => setRiskFilter(tier)}
-                className={`px-2 py-0.5 rounded transition-all shrink-0 ${
-                  riskFilter === tier
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                }`}
-              >
-                {tier}
-              </button>
-            ))}
-          </div>
-
-          {/* Scrollable Parcel List */}
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {filteredFeatures.length === 0 ? (
-              <div className="text-center py-10 px-3 space-y-3 bg-slate-950/40 rounded-xl border border-slate-800/80 my-2">
-                <div className="w-9 h-9 rounded-full bg-slate-800/60 border border-slate-700 mx-auto flex items-center justify-center text-slate-400">
-                  <Search className="w-4 h-4 text-slate-400" />
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-slate-200">No matching parcels found</h4>
-                  <p className="text-[11px] text-slate-400 max-w-[200px] mx-auto leading-relaxed">
-                    No parcels match <span className="text-blue-300 font-mono font-semibold">"{searchQuery}"</span>
-                    {riskFilter !== 'ALL' && <span> with <span className="text-amber-300 font-semibold">{riskFilter}</span> filter</span>}.
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setRiskFilter('ALL');
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] font-medium border border-slate-700 transition-colors"
-                >
-                  <RotateCcw className="w-3 h-3 text-slate-400" />
-                  Reset Search & Filters
-                </button>
-              </div>
-            ) : (
-              filteredFeatures.map((feat) => {
-                const p = feat.properties || {};
-                const effective = getEffectiveFeatureRisk(feat);
-                const isSelected = selectedParcel && (
-                  (selectedFeature && selectedFeature.id && feat.id && selectedFeature.id === feat.id) ||
-                  (selectedParcel.survey_number === p.survey_number && selectedParcel.owner_name === p.owner_name) ||
-                  (selectedParcel.survey_number === p.survey_number)
-                );
-                const risk = getRiskColor(effective.riskLevel);
-                const hasConflict = (p.conflict_status && p.conflict_status !== 'Clean') || effective.isElevatedByDoc;
-
-                return (
-                  <button
-                    key={feat.id || p.survey_number}
-                    onClick={() => handleSelectParcel(feat)}
-                    className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between transition-all ${
-                      isSelected
-                        ? 'bg-blue-950/60 border-blue-500 text-blue-200 ring-1 ring-blue-500/40 shadow-sm'
-                        : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-950'
-                    }`}
-                  >
-                    <div className="truncate pr-2">
-                      <div className="text-xs font-mono font-bold text-white flex items-center gap-1.5">
-                        <span>Survey {p.survey_number}</span>
-                        {hasConflict && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="Disputed or title conflict parcel" />
-                        )}
-                        {effective.isDocLinked && (
-                          <span className="text-[8px] bg-blue-900 text-blue-200 px-1 rounded">MATCH</span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-400 truncate">{p.owner_name || 'Unspecified'}</div>
-                      <div className="text-[10px] text-slate-500">{p.land_area_acres} Acres • {p.village}</div>
-                    </div>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${risk.bg} ${risk.text} ${risk.border}`}>
-                      {effective.riskLevel}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Center: Interactive Leaflet Map Canvas */}
-        <div className="lg:col-span-6 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col space-y-3 shadow-xl h-[580px] relative">
+      {/* Clean Two-Column Layout: Main GIS Map (lg:col-span-8) + Document Parcel Details & Risk Reasons (lg:col-span-4) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Main / Left Area: Interactive Leaflet Map Canvas */}
+        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col space-y-3 shadow-xl min-h-[640px] relative">
           {/* Map Top Bar */}
-          <div className="flex items-center justify-between z-20">
+          <div className="flex items-center justify-between z-20 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-slate-300 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-blue-400" />
-                {selectedParcel ? (
-                  <span>Survey {selectedParcel.survey_number} • {selectedParcel.village || 'Ranga Reddy'}</span>
+              <span className={`text-xs font-mono px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${
+                hasGeometry
+                  ? 'bg-slate-950/90 text-slate-300 border-slate-800'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-800'
+              }`}>
+                <MapPin className={`w-3.5 h-3.5 ${hasGeometry ? 'text-blue-400' : 'text-amber-400'}`} />
+                {hasGeometry ? (
+                  <span>Survey {docSurvey} • {villageMandalDisplay}</span>
                 ) : (
-                  <span>No Parcel Selected • Cadastral View</span>
+                  <span>Parcel location unavailable: Survey {docSurvey || 'Unspecified'}</span>
                 )}
               </span>
+
+              {hasGeometry && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${riskColors.badge}`}>
+                  {docRiskLevel} RISK HIGHLIGHT
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
+              {hasGeometry && (
+                <button
+                  onClick={() => setResetKey((k) => k + 1)}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
+                  title="Center map on uploaded document's parcel"
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  Center on Parcel
+                </button>
+              )}
               <button
                 onClick={() => setResetKey((k) => k + 1)}
                 className="px-2.5 py-1 bg-slate-950/90 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
@@ -781,8 +778,25 @@ export default function GisMap({ activeDocument, verificationResult }) {
             </div>
           </div>
 
-          {/* Leaflet MapContainer */}
-          <div className="flex-1 rounded-xl border border-slate-800 overflow-hidden relative z-10 shadow-inner">
+          {/* Location Unavailable Warning Banner if parcel geometry is missing */}
+          {!hasGeometry && (
+            <div className="bg-amber-950/50 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex items-start gap-2.5 z-20">
+              <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+              <div>
+                <strong>Parcel location unavailable:</strong> The cadastral boundary polygon for Survey{' '}
+                <strong className="font-mono text-amber-300">{docSurvey || 'Unspecified'}</strong> is not indexed in the current demonstration GIS dataset.
+                <span className="block text-amber-300/80 mt-0.5">
+                  The regional cadastral overview is displayed below without selecting or highlighting an unrelated parcel.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Leaflet MapContainer Wrapper */}
+          <div 
+            className="w-full rounded-xl border border-slate-800 overflow-hidden relative z-10 shadow-inner bg-slate-950"
+            style={{ height: '560px', minHeight: '560px' }}
+          >
             {allFeatures.length === 0 && !isLoading ? (
               <div className="w-full h-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-3">
                 <AlertTriangle className="w-8 h-8 text-amber-400" />
@@ -803,6 +817,7 @@ export default function GisMap({ activeDocument, verificationResult }) {
                 zoom={defaultZoom}
                 scrollWheelZoom={true}
                 className="w-full h-full"
+                style={{ height: '100%', minHeight: '560px', width: '100%' }}
                 attributionControl={true}
               >
                 <MapController
@@ -823,16 +838,16 @@ export default function GisMap({ activeDocument, verificationResult }) {
                   />
                 ) : (
                   <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     maxZoom={19}
                   />
                 )}
 
-                {/* Cadastral GeoJSON Polygons Layer: Key reflects active selection and document risk */}
+                {/* Cadastral GeoJSON Polygons Layer */}
                 {allFeatures.length > 0 && (
                   <GeoJSON
-                    key={`geojson_${activeLayer}_${selectedParcel?.survey_number || 'none'}_${selectedFeature?.id || 'none'}_${riskFilter}_${docId || 'none'}_${docRiskScore ?? 'none'}`}
+                    key={`geojson_${activeLayer}_${docSurvey || 'none'}_${docRiskLevel}_${docRiskScore ?? 'none'}_${resetKey}`}
                     ref={geoJsonRef}
                     data={geoData}
                     style={getFeatureStyle}
@@ -840,8 +855,18 @@ export default function GisMap({ activeDocument, verificationResult }) {
                   />
                 )}
 
-                {/* Disputed Overlap Visualizer: Render Claimed Boundary for Survey 402/B when in disputed mode */}
-                {activeLayer === 'encumbrance' && (
+                {/* Active Document standalone geometry if not inside allFeatures */}
+                {effectiveFeature?.geometry && !allFeatures.some((f) => isSurveyMatch(f.properties?.survey_number, docSurvey)) && (
+                  <GeoJSON
+                    key={`doc_standalone_${docId}_${docRiskLevel}`}
+                    data={effectiveFeature}
+                    style={getFeatureStyle}
+                    onEachFeature={onEachFeature}
+                  />
+                )}
+
+                {/* Disputed Overlap Visualizer for Demo Parcels */}
+                {activeLayer === 'encumbrance' && mockGisParcelData?.claimedBoundary && (
                   <Polygon
                     positions={mockGisParcelData.claimedBoundary}
                     pathOptions={{
@@ -865,320 +890,258 @@ export default function GisMap({ activeDocument, verificationResult }) {
             )}
 
             {/* Embedded Floating Map Legend */}
-            <div className="absolute bottom-3 right-3 bg-slate-900/95 backdrop-blur border border-slate-700/80 p-2.5 rounded-xl shadow-xl z-[400] text-[11px] space-y-1.5 max-w-[190px]">
+            <div className="absolute bottom-3 right-3 bg-slate-900/95 backdrop-blur border border-slate-700/80 p-2.5 rounded-xl shadow-xl z-[400] text-[11px] space-y-1.5 max-w-[210px]">
               <div className="font-bold text-white border-b border-slate-800 pb-1 flex items-center justify-between">
                 <span>Map Legend</span>
-                <span className="text-[9px] text-slate-400">Risk & CAD</span>
+                <span className="text-[9px] text-slate-400 font-mono">Risk Scoring</span>
               </div>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 shrink-0 border border-emerald-400" />
-                  <span className="text-slate-300 text-[10px]">Low (0-29)</span>
+                  <span className="text-slate-300 text-[10px]">Low (0–29)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-amber-500 shrink-0 border border-amber-400" />
-                  <span className="text-slate-300 text-[10px]">Med (30-59)</span>
+                  <span className="text-slate-300 text-[10px]">Medium (30–59)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 shrink-0 border border-rose-400" />
-                  <span className="text-slate-300 text-[10px]">High (60-79)</span>
+                  <span className="text-slate-300 text-[10px]">High (60–79)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-sm bg-purple-500 shrink-0 border border-purple-400" />
-                  <span className="text-slate-300 text-[10px]">Critical (80+)</span>
+                  <span className="text-slate-300 text-[10px]">Critical (80–100)</span>
                 </div>
               </div>
               <div className="border-t border-slate-800 pt-1 flex flex-col gap-1 text-[10px]">
-                <div className="flex items-center gap-1.5 text-sky-300">
-                  <span className="w-2.5 h-2.5 rounded-sm border-2 border-sky-400 bg-transparent shrink-0" />
-                  <span>Selected Parcel</span>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="w-3 h-3 rounded-sm shrink-0 border-2"
+                    style={{ backgroundColor: riskColors.fill, borderColor: riskColors.stroke }}
+                  />
+                  <span className="font-semibold text-slate-200">
+                    Uploaded Parcel ({docRiskLevel})
+                  </span>
                 </div>
-                {activeDocument && docRiskScore >= 60 && (
-                  <div className="flex items-center gap-1.5 text-rose-300">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-rose-600 border border-rose-400 shrink-0" />
-                    <span>Doc Risk Conflict</span>
-                  </div>
-                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Selected Parcel Information Panel */}
-        <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg flex flex-col justify-between h-[580px]">
-          {!selectedParcel ? (
-            /* Unindexed / No Linked Parcel State */
-            <div className="flex-1 flex flex-col justify-between space-y-4">
-              <div className="space-y-4">
-                <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <MapPin className="w-4 h-4 text-amber-400" />
-                      Cadastral Linkage
-                    </h3>
-                    <p className="text-[11px] text-slate-400">Spatial Polygon Resolution</p>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-amber-950 text-amber-300 border-amber-800">
-                    NO LINKED PARCEL
-                  </span>
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-900/40 space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>Unindexed Survey Number</span>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Survey <strong className="text-amber-200 font-mono">{docSurvey || 'N/A'}</strong> has no corresponding cadastral boundary polygon in the current GIS registry dataset.
-                  </p>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400 font-semibold">Document Survey</span>
-                    <span className="font-mono font-bold text-amber-300">{docSurvey || 'N/A'}</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400 font-semibold">Claimed Executant</span>
-                    <span className="font-bold text-white truncate max-w-[130px]">{docOwner || 'N/A'}</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400 font-semibold">Claimed Acreage</span>
-                    <span className="font-bold text-white">{docArea ? `${docArea} ${docAreaUnit}` : 'N/A'}</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400 font-semibold">Document Risk</span>
-                    <span className="font-mono font-bold text-emerald-400">LOW (0/100)</span>
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 leading-relaxed">
-                  <strong className="text-slate-200 block mb-1">LandGuard Policy:</strong>
-                  Missing reference records alone are never scored as fraud. No unrelated parcel is selected or recolored.
-                </div>
+        {/* Right Area: Selected Uploaded Document's Parcel Details & Risk Explanation */}
+        <div className="lg:col-span-4 space-y-4">
+          {/* Card 1: Selected Parcel Info Panel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+            <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-blue-400" />
+                  Selected Parcel Info
+                </h3>
+                <p className="text-[11px] text-slate-400">Active Uploaded Deed Parameters</p>
               </div>
-
-              <div className="pt-2 border-t border-slate-800">
-                <button
-                  onClick={() => {
-                    if (allFeatures.length > 0) {
-                      handleSelectParcel(allFeatures[0]);
-                    }
-                  }}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors border border-slate-700"
-                >
-                  <Search className="w-3.5 h-3.5 text-blue-400" />
-                  Browse Cadastral Parcels
-                </button>
-              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-bold uppercase shrink-0">
+                Active Document
+              </span>
             </div>
-          ) : isLinkedToActiveDoc ? (
-            /* Linked Parcel with Dual-Track Risk Assessment */
-            <div className="space-y-3.5 flex-1 overflow-y-auto pr-1">
-              <div className="border-b border-slate-800 pb-2.5 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4 text-blue-400" />
-                    Selected Parcel Info
-                  </h3>
-                  <p className="text-[11px] text-slate-400">Survey {selectedParcel.survey_number} • {selectedParcel.village || 'Ranga Reddy'}</p>
-                </div>
-                <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-bold">
-                  ACTIVE DOC LINK
-                </span>
-              </div>
 
-              {/* Dual-Track Risk Assessment Display */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`p-2 rounded-xl border text-center ${
-                  selectedEffective?.isElevatedByDoc
-                    ? 'bg-rose-950/60 border-rose-800 text-rose-300'
-                    : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                }`}>
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Document Risk</div>
-                  <div className="text-xs font-extrabold font-mono mt-0.5">
-                    {selectedEffective?.docRiskLevel || 'LOW'} ({selectedEffective?.docRiskScore ?? 0}/100)
-                  </div>
-                </div>
-
-                <div className={`p-2 rounded-xl border text-center ${selectedRefRiskColor.bg} ${selectedRefRiskColor.border} ${selectedRefRiskColor.text}`}>
-                  <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Reference Parcel</div>
-                  <div className="text-xs font-extrabold font-mono mt-0.5">
-                    {selectedRefRisk}
-                  </div>
-                </div>
-              </div>
-
+            {effectiveDocument ? (
               <div className="space-y-2 text-xs">
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Survey Sub-division</span>
-                  <span className="font-mono font-bold text-blue-300">{selectedParcel.survey_number}</span>
-                </div>
-
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Registered Owner</span>
-                  <span className="font-bold text-white truncate max-w-[130px]" title={selectedParcel.owner_name}>
-                    {selectedParcel.owner_name || 'N/A'}
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <span className="text-slate-400 font-semibold">Document ID</span>
+                  <span className="font-mono font-bold text-slate-200 truncate max-w-[150px]" title={docId || 'Not available'}>
+                    {docId || 'Not available'}
                   </span>
                 </div>
 
-                {docOwner && docOwner !== selectedParcel.owner_name && (
-                  <div className="p-2 rounded-lg bg-rose-950/40 border border-rose-900/60 flex justify-between items-center text-rose-300">
-                    <span className="text-[11px] font-semibold">Claimed Executant</span>
-                    <span className="font-bold text-xs truncate max-w-[130px]" title={docOwner}>{docOwner}</span>
-                  </div>
-                )}
-
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Parcel Acreage</span>
-                  <span className="font-bold text-white">{selectedParcel.land_area_acres} Acres</span>
-                </div>
-
-                {docArea && (
-                  <div className={`p-2 rounded-lg border flex justify-between items-center ${
-                    selectedEffective?.isElevatedByDoc
-                      ? 'bg-rose-950/40 border-rose-900/60 text-rose-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-300'
-                  }`}>
-                    <span className="text-[11px] font-semibold">Claimed Acreage</span>
-                    <span className="font-bold text-xs">{docArea} {docAreaUnit}</span>
-                  </div>
-                )}
-
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Location</span>
-                  <span className="font-bold text-white truncate max-w-[130px]">
-                    {selectedParcel.village}, {selectedParcel.district || 'Demo District'}
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <span className="text-slate-400 font-semibold">Survey Number</span>
+                  <span className="font-mono font-bold text-blue-300">
+                    {docSurvey || 'Not available'}
                   </span>
                 </div>
 
-                {centroid && (
-                  <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center font-mono">
-                    <span className="text-slate-400 font-sans font-semibold text-[11px]">Centroid (Lat, Lng)</span>
-                    <span className="text-[10px] text-slate-300">{centroid.lat}, {centroid.lng}</span>
-                  </div>
-                )}
-              </div>
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <span className="text-slate-400 font-semibold">Claimed Owner</span>
+                  <span className="font-bold text-white truncate max-w-[150px]" title={docOwner || 'Not available'}>
+                    {docOwner || 'Not available'}
+                  </span>
+                </div>
 
-              {/* Conflict / Anomaly Status */}
-              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Anomaly / Conflict Status</span>
-                {selectedEffective?.isElevatedByDoc || (selectedParcel.conflict_status && selectedParcel.conflict_status !== 'Clean') ? (
-                  <div className="flex items-start gap-1.5 text-xs text-rose-300 font-semibold leading-snug">
-                    <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
-                    <span>
-                      {selectedParcel.conflict_status && selectedParcel.conflict_status !== 'Clean'
-                        ? selectedParcel.conflict_status
-                        : `Title / extent conflict: Claimed ${docArea || '12.50'} ${docAreaUnit} vs ${selectedParcel.land_area_acres} Registered Acres`}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Clean Cadastral Title — Verified Match</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Unlinked parcel selection (browsing) */
-            <div className="space-y-3.5 flex-1 overflow-y-auto pr-1">
-              <div className="border-b border-slate-800 pb-2.5 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4 text-blue-400" />
-                    Selected Parcel Info
-                  </h3>
-                  <p className="text-[11px] text-slate-400">GIS Cadastral Properties</p>
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <span className="text-slate-400 font-semibold">Claimed Land Area</span>
+                  <span className="font-bold text-white">
+                    {docArea || 'Not available'}
+                  </span>
                 </div>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${selectedRefRiskColor.bg} ${selectedRefRiskColor.text} ${selectedRefRiskColor.border}`}>
-                  {selectedRefRisk}
-                </span>
-              </div>
 
-              {activeDocument && (
-                <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Unlinked to active document</span>
-                  <button
-                    onClick={() => {
-                      if (docSurvey) {
-                        const match = allFeatures.find((f) => isSurveyMatch(f.properties?.survey_number, docSurvey));
-                        if (match) handleSelectParcel(match);
-                      }
-                    }}
-                    className="text-blue-400 hover:text-blue-300 font-semibold underline text-[11px]"
-                  >
-                    Back to Survey {docSurvey}
-                  </button>
-                </div>
-              )}
-
-              <div className="space-y-2 text-xs">
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Survey Sub-division</span>
-                  <span className="font-mono font-bold text-blue-300">{selectedParcel.survey_number}</span>
-                </div>
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Registered Owner</span>
-                  <span className="font-bold text-white truncate max-w-[140px]">{selectedParcel.owner_name || 'N/A'}</span>
-                </div>
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400 font-semibold">Parcel Acreage</span>
-                  <span className="font-bold text-white">{selectedParcel.land_area_acres} Acres</span>
-                </div>
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
                   <span className="text-slate-400 font-semibold">Village / Mandal</span>
-                  <span className="font-bold text-white truncate max-w-[140px]">
-                    {selectedParcel.village}, {selectedParcel.mandal || 'RR'}
+                  <span className="font-bold text-white truncate max-w-[150px]" title={villageMandalDisplay}>
+                    {villageMandalDisplay}
                   </span>
                 </div>
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
                   <span className="text-slate-400 font-semibold">District & State</span>
-                  <span className="font-bold text-white">{selectedParcel.district || 'Ranga Reddy'}, {selectedParcel.state || 'Telangana'}</span>
+                  <span className="font-bold text-white truncate max-w-[150px]" title={districtDisplay}>
+                    {districtDisplay}
+                  </span>
                 </div>
-                {centroid && (
-                  <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center font-mono">
-                    <span className="text-slate-400 font-sans font-semibold text-[11px]">Centroid (Lat, Lng)</span>
-                    <span className="text-[10px] text-slate-300">{centroid.lat}, {centroid.lng}</span>
-                  </div>
-                )}
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Conflict Status</span>
-                  {selectedParcel.conflict_status && selectedParcel.conflict_status !== 'Clean' ? (
-                    <div className="flex items-start gap-1.5 text-xs text-rose-300 font-semibold">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-                      <span>{selectedParcel.conflict_status}</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold">
+
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <span className="text-slate-400 font-semibold">Boundary Status</span>
+                  {hasGeometry ? (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Clean Cadastral Title</span>
-                    </div>
+                      Cadastral Linked
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 font-semibold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Parcel location unavailable
+                    </span>
                   )}
                 </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex justify-between items-center font-mono">
+                  <span className="text-slate-400 font-sans font-semibold text-[11px]">Centroid Coordinates</span>
+                  <span className="text-[11px] text-slate-300">
+                    {centroid ? `${centroid.lat}, ${centroid.lng}` : 'Parcel location unavailable'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center space-y-2">
+                <FileText className="w-8 h-8 text-slate-500 mx-auto" />
+                <p className="text-xs text-slate-300 font-semibold">No active document selected</p>
+                <p className="text-[11px] text-slate-500">
+                  Upload or select a document in the verification workflow to view its spatial parcel details.
+                </p>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate('upload')}
+                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
+                  >
+                    <Upload className="w-3 h-3" />
+                    Go to Upload
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Action Button */}
+            {hasGeometry && (
+              <div className="pt-2 border-t border-slate-800">
+                <button
+                  onClick={() => setResetKey((k) => k + 1)}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md"
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  Center on Uploaded Parcel
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Card 2: Risk Assessment & Reasons Panel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+            <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                  Risk Assessment & Reasons
+                </h3>
+                <p className="text-[11px] text-slate-400">Automated Audit & Verification Findings</p>
               </div>
             </div>
-          )}
 
-          {/* Action buttons (only when a parcel is selected) */}
-          {selectedParcel && (
-            <div className="space-y-2 pt-2 border-t border-slate-800">
-              <button
-                onClick={() => {
-                  if (targetBounds) {
-                    setSelectedFeature({ ...selectedFeature });
-                  }
-                }}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md"
-              >
-                <Crosshair className="w-3.5 h-3.5" />
-                Center on Selected Parcel
-              </button>
-              <p className="text-[10px] text-center text-slate-500">
-                Cadastral boundaries derived from synthetic test fixtures.
-              </p>
+            {/* Risk Metrics Summary Grid */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className={`p-3 rounded-xl border text-center ${riskColors.bg} ${riskColors.border}`}>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Risk Score</div>
+                <div className={`text-base font-black font-mono mt-0.5 ${riskColors.text}`}>
+                  {docRiskScore !== null && !isNaN(docRiskScore) ? `${docRiskScore} / 100` : 'Not available'}
+                </div>
+              </div>
+
+              <div className={`p-3 rounded-xl border text-center ${riskColors.bg} ${riskColors.border}`}>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Risk Category</div>
+                <div className={`text-base font-black font-mono mt-0.5 ${riskColors.text}`}>
+                  {docRiskLevel || 'Not available'}
+                </div>
+              </div>
             </div>
-          )}
+
+            {/* Verification Status */}
+            <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center text-xs">
+              <span className="text-slate-400 font-semibold">Verification Status</span>
+              {docVerificationStatus ? (
+                <StatusBadge status={docVerificationStatus} />
+              ) : (
+                <span className="text-slate-400">Not available</span>
+              )}
+            </div>
+
+            {/* Specific Reasons Section */}
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Audit Reasons & Discrepancies
+              </div>
+
+              {riskReasons.length > 0 ? (
+                <div className="space-y-2">
+                  {riskReasons.map((reason) => (
+                    <div
+                      key={reason.id}
+                      className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-200">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>{reason.title}</span>
+                        </div>
+                        {reason.points > 0 && (
+                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-900 shrink-0">
+                            +{reason.points} pts
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {reason.whyItMatters}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : docRiskScore !== null && docRiskScore <= 20 ? (
+                <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-900/60 space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>No major inconsistencies detected.</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Cross-verification against official land revenue registry records did not detect any title discontinuities, area inflations, or encumbrance anomalies.
+                  </p>
+                </div>
+              ) : docRiskScore !== null ? (
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Elevated risk indicators were assigned during automated analysis. Detailed breakdown records are not available.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                  Risk assessment details are currently unavailable for this document.
+                </div>
+              )}
+            </div>
+
+            {/* Non-defamatory Disclaimer Note */}
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[10px] text-slate-500 leading-relaxed">
+              <strong className="text-slate-400 block mb-0.5">Administrative Notice:</strong>
+              Risk indicators identify discrepancies requiring verification by revenue authorities and do not constitute an official determination of fraud. Synthetic demonstration data.
+            </div>
+          </div>
         </div>
       </div>
     </div>

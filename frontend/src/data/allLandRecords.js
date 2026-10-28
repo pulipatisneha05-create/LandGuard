@@ -1,6 +1,51 @@
 // Comprehensive synthetic land & document records for global application search
 export const allSearchableRecords = [
   {
+      "record_id": "REC-TEST-1042",
+      "owner_name": "Arun Kumar",
+      "survey_number": "SY-TEST-104/2",
+      "land_area_acres": "0.0496",
+      "village": "Green Valley",
+      "mandal": "Demo Mandal",
+      "district": "Demo District",
+      "state": "Telangana",
+      "registration_number": "DOC-TEST-2026-001",
+      "registration_date": "2026-09-15",
+      "document_type": "Sale Deed",
+      "source": "baseline",
+      "type": "land_record"
+  },
+  {
+      "record_id": "REC-118A",
+      "owner_name": "Venkat Swamy Goud",
+      "survey_number": "118/A",
+      "land_area_acres": "0.50",
+      "village": "Gachibowli",
+      "mandal": "Serilingampally",
+      "district": "Ranga Reddy",
+      "state": "Telangana",
+      "registration_number": "DOC-ROR-2024-118A",
+      "registration_date": "2024-05-12",
+      "document_type": "Patta Passbook",
+      "source": "baseline",
+      "type": "land_record"
+  },
+  {
+      "record_id": "REC-304C",
+      "owner_name": "Anuradha Rao",
+      "survey_number": "304/C",
+      "land_area_acres": "3.50",
+      "village": "Kondapur",
+      "mandal": "Serilingampally",
+      "district": "Ranga Reddy",
+      "state": "Telangana",
+      "registration_number": "EC-2026-8812",
+      "registration_date": "2026-10-15",
+      "document_type": "Encumbrance Certificate",
+      "source": "baseline",
+      "type": "land_record"
+  },
+  {
     "record_id": "REC-1001",
     "owner_name": "Anil Kumar Rao",
     "survey_number": "101/A",

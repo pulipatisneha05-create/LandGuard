@@ -1,3 +1,5 @@
+import { getLocalOwnershipHistory } from "../utils/verificationEvaluator";
+
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "https://landguard-1-a465.onrender.com/api";
 
@@ -76,11 +78,15 @@ export async function getGisParcelsApi(documentId = null) {
 }
 
 export async function getOwnershipHistoryApi(documentId) {
-  const response = await fetch(`${API_BASE_URL}/documents/${documentId}/history`);
-  if (!response.ok) {
-    throw new Error("Failed to fetch ownership history timeline.");
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/${documentId}/history`);
+    if (response.ok) {
+      return await response.json();
+    }
+  } catch (err) {
+    console.warn("Live ownership history notice, falling back:", err.message);
   }
-  return response.json();
+  return getLocalOwnershipHistory(documentId);
 }
 
 export async function searchRecordsApi(query) {

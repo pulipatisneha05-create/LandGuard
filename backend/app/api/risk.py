@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import DocumentRecord, RiskAssessment, VerificationResult
 from app.risk_scoring.engine import risk_scoring_engine
-from app.api.documents import UPLOADS_DIR
+from app.api.documents import UPLOADS_DIR, RECENT_VERIFICATIONS
 
 logger = logging.getLogger("landguard.risk")
 
@@ -20,6 +20,8 @@ def assess_document_risk(document_id: str, db: Session = Depends(get_db)):
     Generates a 0-100 risk score, risk level (LOW/MEDIUM/HIGH/CRITICAL),
     transparent point breakdown, and revenue recommendation.
     """
+    if document_id in RECENT_VERIFICATIONS:
+        return RECENT_VERIFICATIONS[document_id][1]
     doc_record = None
     try:
         doc_record = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
@@ -47,6 +49,8 @@ def get_risk_assessment_result(document_id: str, db: Session = Depends(get_db)):
     """
     Fetch computed risk assessment breakdown and recommendations for a document_id.
     """
+    if document_id in RECENT_VERIFICATIONS:
+        return RECENT_VERIFICATIONS[document_id][1]
     doc_record = None
     try:
         doc_record = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()

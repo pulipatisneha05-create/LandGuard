@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import VerificationResult, DocumentRecord
 from app.verification.engine import verification_engine
-from app.api.documents import UPLOADS_DIR
+from app.api.documents import UPLOADS_DIR, RECENT_VERIFICATIONS
 
 logger = logging.getLogger("landguard.verification")
 
@@ -30,6 +30,8 @@ def verify_document_endpoint(document_id: str, db: Session = Depends(get_db)):
             pass
 
     if not doc_record:
+        if document_id in RECENT_VERIFICATIONS:
+            return RECENT_VERIFICATIONS[document_id][0]
         matching_files = [f for f in os.listdir(UPLOADS_DIR) if f.startswith(document_id)] if os.path.exists(UPLOADS_DIR) else []
         if not matching_files:
             raise HTTPException(
@@ -46,6 +48,8 @@ def get_verification_results(document_id: str, db: Session = Depends(get_db)):
     """
     Fetch stored verification results and anomaly audit breakdown for a document_id.
     """
+    if document_id in RECENT_VERIFICATIONS:
+        return RECENT_VERIFICATIONS[document_id][0]
     ver_record = None
     try:
         ver_record = db.query(VerificationResult).filter(VerificationResult.document_id == document_id).first()

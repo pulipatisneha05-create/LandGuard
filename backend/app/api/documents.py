@@ -24,6 +24,10 @@ UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads")
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB limit
 
+# In-memory resilient cache for recently uploaded and evaluated documents
+RECENT_VERIFICATIONS = {}
+RECENT_DOCUMENTS = {}
+
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_document(
@@ -112,6 +116,42 @@ async def upload_document(
         db.rollback()
         print(f"Notice: PostgreSQL persistence note: {db_err}")
 
+    # 8. Compute Verification & Explainable Risk Assessment
+    verification_payload = None
+    risk_payload = None
+    try:
+        from app.verification.engine import verification_engine
+        from app.risk_scoring.engine import risk_scoring_engine
+
+        owner_name = fields.get("owner_name")
+        survey_number = fields.get("survey_number")
+        land_area_raw = fields.get("land_area_raw")
+        land_area_unit = fields.get("land_area_unit") or "Acres"
+        land_area_numeric = float(fields.get("land_area_normalized_acres") if fields.get("land_area_normalized_acres") is not None else (fields.get("land_area_acres") or 0.0))
+        village = fields.get("village")
+        mandal = fields.get("mandal")
+        district = fields.get("district")
+        doc_type = nlp_result.get("document_type", "General Land Record")
+
+        verification_payload = verification_engine.verify_extracted_attributes(
+            owner_name=owner_name,
+            survey_number=survey_number,
+            land_area=land_area_numeric,
+            land_area_unit=land_area_unit,
+            land_area_raw=land_area_raw,
+            doc_village=village,
+            doc_mandal=mandal,
+            doc_district=district,
+            document_type=doc_type,
+            document_id=doc_id,
+            db=db
+        )
+        risk_payload = risk_scoring_engine.score_verification_payload(verification_payload, db=db)
+        RECENT_VERIFICATIONS[doc_id] = (verification_payload, risk_payload)
+        RECENT_DOCUMENTS[doc_id] = doc_record
+    except Exception as ver_err:
+        logger.warning(f"Verification evaluation during upload note: {ver_err}")
+
     return {
         "message": "Document uploaded, OCR processed, and NLP entities extracted successfully.",
         "document_id": doc_id,
@@ -130,6 +170,10 @@ async def upload_document(
         "field_metadata": nlp_result.get("field_metadata", {}),
         "requires_review": nlp_result.get("requires_review", False),
         "location_summary": nlp_result.get("location_summary"),
+        "verification_result": verification_payload,
+        "risk_assessment": risk_payload,
+        "risk_score": risk_payload.get("risk_score") if risk_payload else None,
+        "risk_level": risk_payload.get("risk_level") if risk_payload else None,
         "disclaimer": "Synthetic demonstration prototype. Not an official government certification."
     }
 
