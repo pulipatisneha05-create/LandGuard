@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Shield,
   ShieldCheck,
@@ -28,9 +28,17 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  // Guarantee email and password are empty by default on initial mount and prevent browser cache prefill
+  useEffect(() => {
+    setEmail('');
+    setPassword('');
+  }, []);
+
   const handleRoleChange = (newRole) => {
     setRole(newRole);
     setErrorMessage('');
+    setEmail('');
+    setPassword('');
   };
 
   const handleQuickFill = (targetRole) => {
@@ -514,11 +522,11 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
           )}
 
           {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
             
             {/* Email Field */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              <label htmlFor="email" className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Email Address
               </label>
               <div className="relative">
@@ -526,7 +534,12 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
+                  id="email"
+                  name="email"
                   type="email"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email address"
@@ -539,7 +552,7 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
             {/* Password Field with Show/Hide */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-700">
+                <label htmlFor="password" className="block text-xs font-semibold text-slate-700">
                   Password
                 </label>
                 <button
@@ -555,7 +568,10 @@ export default function Login({ onLoginSuccess, onNavigateHome }) {
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
+                  id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
